@@ -1,0 +1,12 @@
+// .vscode/settings.json
+{
+    // **核心配置：限制并行任务数为 3**
+    "cmake.buildParallelJobs": 3,
+
+    // 推荐保留的其他配置，确保使用 Ninja
+    "cmake.generator": "Ninja",
+
+    // 推荐：明确构建输出目录
+    "cmake.buildDirectory": "${workspaceFolder}/build" 
+}
+

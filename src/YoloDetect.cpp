@@ -3,7 +3,6 @@
 #include <opencv2/core.hpp> // For cv::Scalar
 #include<time.h>
 #include<opencv2/opencv.hpp>
-
 #include <YoloDetect.h>
 
 // using namespace dnn;
@@ -12,7 +11,7 @@ YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
-    std::string model_path_seg = "models/yolov8s-seg.onnx";
+    std::string model_path_seg = "models/yolo11s-seg.onnx";
 
 	// loading model
     if (model.ReadModel(model_path_seg, true)) {

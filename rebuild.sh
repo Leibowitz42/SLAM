@@ -11,10 +11,10 @@ mkdir build
 cd build
 
 echo ">>> 运行 CMake..."
-cmake .. 
+cmake -G Ninja ..
 # 内存 8GB，限制并行数为2
 echo ">>> 开始编译 (限制并行任务为2)..."
-make -j3
+ninja -j3
 
 echo ">>> 编译完成！"
 
