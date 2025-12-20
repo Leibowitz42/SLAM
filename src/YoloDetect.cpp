@@ -65,23 +65,30 @@ bool YoloDetection::Detect()
                 left = result[i].box.x;
                 top = result[i].box.y;
             }
+
+            // 1. 可视化部分（保持原样，用于画出带颜色的分割图）
             if (result[i].rotatedBox.size.width * result[i].rotatedBox.size.height > 0) {
                 DrawRotatedBox(img, result[i].rotatedBox, color[result[i].id], 2);
                 left = result[i].rotatedBox.center.x;
                 top = result[i].rotatedBox.center.y;
             }
             
-            // add masked image to mvDynamicMask
+            // add masked image to mvDynamicMask  2. 核心分类逻辑
             if (result[i].boxMask.rows && result[i].boxMask.cols > 0){
                 mask(result[i].box).setTo(color[result[i].id], result[i].boxMask);
             }
+            // 检查当前物体的类别名称是否在“预设动态物体列表(mvDynamicNames)”中
             if (count(mvDynamicNames.begin(), mvDynamicNames.end(), model._className[result[i].id])){
+                // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 255 (白色)
                 objectMask(result[i].box).setTo(cv::Scalar(255, 255, 255), result[i].boxMask);
+                // b. 存入列表：把这张包含白色块的图存进 mvDynamicMask
                 mvDynamicMask.push_back(objectMask);
+                // c. 存入矩形框：记录这个物体的左上角坐标和宽高
                 cv::Rect2i DynamicArea(left, top, (result[i].box.width), (result[i].box.height));
                 mvDynamicArea.push_back(DynamicArea);
             }
             
+            // 3. 统计映射（保持原样，供 Viewer 使用）
             cv:: Rect2i DetectArea(left, top, (result[i].box.width), (result[i].box.height));
             mmDetectMap[model._className[result[i].id]].push_back(DetectArea);
            

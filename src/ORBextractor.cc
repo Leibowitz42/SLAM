@@ -883,9 +883,9 @@ namespace ORB_SLAM3
                         {
                             for (auto it = mvDynamicMask.begin(); it != mvDynamicMask.end(); it++) {
                                 Find = false;
-                                if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) {
+                                if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) { // 检查像素是否为白色（动态物体）
                                     Find = true;
-                                    vit_kp = vToDistributeKeys.erase(vit_kp);
+                                    vit_kp = vToDistributeKeys.erase(vit_kp); // 剔除特征点
                                     break;
                                 }
                             }

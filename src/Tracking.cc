@@ -1463,7 +1463,7 @@ namespace ORB_SLAM3
         mImGray = imRGB;
         cv::Mat imDepth = imD;
 
-        // Yolov8
+        // Yolo11
         cv::Mat InputImage;
         InputImage = imRGB.clone();
         //rgb to yolo
@@ -1476,13 +1476,8 @@ namespace ORB_SLAM3
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
             //semantic infor to viewer
             mpViewer->mmDetectMap = mpDetector->mmDetectMap;
-            mpViewer->mask = mpDetector->mask;
+            mpViewer->mask = mpDetector->mask.clone();
         }
-        //clear
-        mpDetector->mvDynamicArea.clear();
-        mpDetector->mmDetectMap.clear();
-        mpDetector->mask.release();
-        mpDetector->mvDynamicMask.clear();
 
         if (mImGray.channels() == 3)
         {
@@ -1515,6 +1510,12 @@ namespace ORB_SLAM3
 #endif
 
         Track();
+
+        //clear
+        mpDetector->mvDynamicArea.clear();
+        mpDetector->mmDetectMap.clear();
+        mpDetector->mask.release();
+        mpDetector->mvDynamicMask.clear();
 
         return mCurrentFrame.GetPose();
     }
