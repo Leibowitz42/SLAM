@@ -30,10 +30,11 @@ public:
 
     // 6-28
     vector<string> mvDynamicNames;
+    vector<string> mvCandidateNames;
     
     vector<cv::Rect2i> mvDynamicArea;
     vector<cv:: Mat> mvDynamicMask;
-    std::vector<cv::Mat> mvCandidateMask;
+    vector<cv::Mat> mvCandidateMask;
 
     // map for detection and mask together
     map<string, vector<cv::Rect2i>> mmDetectMap;

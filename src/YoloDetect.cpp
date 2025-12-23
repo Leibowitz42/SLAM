@@ -24,6 +24,8 @@ YoloDetection::YoloDetection()
 
     mvDynamicNames = {"person", "car", "motorbike", "bus", "train", "truck", "boat", "bird", "cat",
                       "dog", "horse", "sheep", "crow", "bear"};
+    mvCandidateNames = {"chair", "book"};
+
 }
 
 YoloDetection::~YoloDetection()
@@ -86,6 +88,12 @@ bool YoloDetection::Detect()
                 // c. 存入矩形框：记录这个物体的左上角坐标和宽高
                 cv::Rect2i DynamicArea(left, top, (result[i].box.width), (result[i].box.height));
                 mvDynamicArea.push_back(DynamicArea);
+            }
+            else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), model._className[result[i].id])){
+                // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 255 (白色)
+                objectMask(result[i].box).setTo(cv::Scalar(128, 128, 128), result[i].boxMask);
+                // b. 存入列表：把这张包含白色块的图存进 mvCandidateMask
+                mvCandidateMask.push_back(objectMask);
             }
             
             // 3. 统计映射（保持原样，供 Viewer 使用）

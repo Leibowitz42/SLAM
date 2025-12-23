@@ -877,39 +877,45 @@ namespace ORB_SLAM3
                         vit->pt *= scale;
                     }
                     // YOLO Mask
-                    bool Find = false;
                     for (auto vit_kp = vToDistributeKeys.begin(); vit_kp != vToDistributeKeys.end();) {
-                        if (!mvDynamicMask.empty())
-                        {
-                            for (auto it = mvDynamicMask.begin(); it != mvDynamicMask.end(); it++) {
-                                Find = false;
-                                if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) { // 检查像素是否为白色（动态物体）
-                                    Find = true;
-                                    vit_kp = vToDistributeKeys.erase(vit_kp); // 剔除特征点
-                                    break;
-                                }
-                            }
-                        } 
-                        
-                        else 
-                        {
-                            // std:: cout<<"inside else"<<endl;
-                            for (auto vit_area = mvDynamicArea.begin(); vit_area != mvDynamicArea.end(); vit_area++)
-                            {
-                                Find = false;
-                                if (vit_area->contains(vit_kp->pt))
-                                {
-                                    Find = true;
-                                    vit_kp = vToDistributeKeys.erase(vit_kp);
-                                    std::cout<<"Erased"<<std::endl;
-                                    break;
-                                }
+                        bool Find = false;
+                        for (auto it = mvDynamicMask.begin(); it != mvDynamicMask.end(); it++) {
+                            if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) { // 检查像素是否为白色（动态物体）
+                                Find = true;
+                                vit_kp = vToDistributeKeys.erase(vit_kp); // 剔除特征点
+                                break;
                             }
                         }
-                        if (!Find) {
-                            ++vit_kp;
-                            Find = false;
+                    
+                        if (Find) {
+                            // 重要！这里用 continue 直接跳过后面的“椅子检查”和“++vit_kp”
+                            // 因为 vit_kp 已经通过 erase 更新过了
+                            continue; 
                         }
+                        // else 
+                        // {
+                        //     // std:: cout<<"inside else"<<endl;
+                        //     for (auto vit_area = mvDynamicArea.begin(); vit_area != mvDynamicArea.end(); vit_area++)
+                        //     {
+                        //         Find = false;
+                        //         if (vit_area->contains(vit_kp->pt))
+                        //         {
+                        //             Find = true;
+                        //             vit_kp = vToDistributeKeys.erase(vit_kp);
+                        //             std::cout<<"Erased"<<std::endl;
+                        //             break;
+                        //         }
+                        //     }
+                        // }
+
+                        for (auto it = mvCandidateMask.begin(); it != mvCandidateMask.end(); it++) {
+                            if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) { // 检查像素是否为白色（动态物体）
+                                vit_kp->class_id = 42; // 42 代表“待几何检查”
+                                break;
+                            }
+                        }
+
+                        ++vit_kp;
                     }
 
                                       

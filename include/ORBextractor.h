@@ -83,6 +83,7 @@ public:
     std::vector<cv::Mat> mvImagePyramid;
     std::vector<cv::Rect2i> mvDynamicArea;
     std::vector<cv::Mat> mvDynamicMask;
+    std::vector<cv::Mat> mvCandidateMask;
 
 protected:
 
