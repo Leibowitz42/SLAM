@@ -55,10 +55,12 @@ bool YoloDetection::Detect()
         color.push_back(cv::Scalar(b, g, r));
     }
     std::vector<OutputParams> result;
+    mInstanceMap = cv::Mat::zeros(image.size(), CV_8UC1);
     objectMask = cv::Mat::zeros(image.size(), CV_8UC1);
     // std:: cout<< "objectMask size: " << objectMask.size() << " image size: " << image.size() << endl;
     if (model.OnnxDetect(image, result)) {
         mask = cv::Mat::zeros(image.size(), CV_8UC3);
+        int candidateID = 1; // 给半动态物体的起始 ID (1-250)
         for (int i = 0; i < result.size(); i++) {
             int left, top;
             int color_num = i;
@@ -81,19 +83,14 @@ bool YoloDetection::Detect()
             }
             // 检查当前物体的类别名称是否在“预设动态物体列表(mvDynamicNames)”中
             if (count(mvDynamicNames.begin(), mvDynamicNames.end(), model._className[result[i].id])){
-                // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 255 (白色)
-                objectMask(result[i].box).setTo(cv::Scalar(255, 255, 255), result[i].boxMask);
-                // b. 存入列表：把这张包含白色块的图存进 mvDynamicMask
-                mvDynamicMask.push_back(objectMask);
-                // c. 存入矩形框：记录这个物体的左上角坐标和宽高
-                cv::Rect2i DynamicArea(left, top, (result[i].box.width), (result[i].box.height));
-                mvDynamicArea.push_back(DynamicArea);
+                mInstanceMap(result[i].box).setTo(cv::Scalar(255), result[i].boxMask);
             }
             else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), model._className[result[i].id])){
                 // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 255 (白色)
-                objectMask(result[i].box).setTo(cv::Scalar(128, 128, 128), result[i].boxMask);
-                // b. 存入列表：把这张包含白色块的图存进 mvCandidateMask
-                mvCandidateMask.push_back(objectMask);
+                mInstanceMap(result[i].box).setTo(cv::Scalar(candidateID), result[i].boxMask);
+                // 增加 ID，确保下一把椅子有不同的编号
+                candidateID++; 
+                if(candidateID >= 255) candidateID = 254; // 防止溢出
             }
             
             // 3. 统计映射（保持原样，供 Viewer 使用）

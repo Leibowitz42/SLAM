@@ -1471,7 +1471,8 @@ namespace ORB_SLAM3
         mpDetector->Detect();
         //mask to orbextractor
         mpORBextractorLeft->mvDynamicMask = mpDetector->mvDynamicMask;
-        mpORBextractorLeft->mvDynamicArea = mpDetector->mvDynamicArea;
+        mpORBextractorLeft->mInstanceMap = mpDetector->mInstanceMap.clone();
+        std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
         {
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
             //semantic infor to viewer
@@ -1513,9 +1514,9 @@ namespace ORB_SLAM3
 
         //clear
         mpDetector->mvDynamicArea.clear();
+        //mpDetector->mInstanceMap.release();
         mpDetector->mmDetectMap.clear();
         mpDetector->mask.release();
-        mpDetector->mvDynamicMask.clear();
 
         return mCurrentFrame.GetPose();
     }

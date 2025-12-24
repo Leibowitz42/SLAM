@@ -40,6 +40,7 @@ public:
     map<string, vector<cv::Rect2i>> mmDetectMap;
     cv::Mat mask;
     cv::Mat objectMask;
+    cv::Mat mInstanceMap;
 
 };
 

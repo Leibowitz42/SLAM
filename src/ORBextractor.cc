@@ -71,8 +71,7 @@ namespace ORB_SLAM3
     const int PATCH_SIZE = 31;
     const int HALF_PATCH_SIZE = 15;
     const int EDGE_THRESHOLD = 19;
-
-
+    
     static float IC_Angle(const Mat& image, Point2f pt,  const vector<int> & u_max)
     {
         int m_01 = 0, m_10 = 0;
@@ -878,44 +877,53 @@ namespace ORB_SLAM3
                     }
                     // YOLO Mask
                     for (auto vit_kp = vToDistributeKeys.begin(); vit_kp != vToDistributeKeys.end();) {
-                        bool Find = false;
-                        for (auto it = mvDynamicMask.begin(); it != mvDynamicMask.end(); it++) {
-                            if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) { // 检查像素是否为白色（动态物体）
-                                Find = true;
-                                vit_kp = vToDistributeKeys.erase(vit_kp); // 剔除特征点
-                                break;
+                        bool bDelete = false;
+                        if(!mInstanceMap.empty()) 
+                        {
+                            // static int count = 0;
+                            // if(count++ % 100 == 0) {
+                            //     std::cout << "DEBUG: Map size: " << mInstanceMap.cols << "x" << mInstanceMap.rows << std::endl;
+                            // }
+                            // 获取像素坐标
+                            int x = cvRound(vit_kp->pt.x);
+                            int y = cvRound(vit_kp->pt.y);
+                            if(x >= 0 && x < mInstanceMap.cols && y >= 0 && y < mInstanceMap.rows) 
+                            {
+                                // 直接在 InstanceMap 采样
+                                uchar pixelVal = mInstanceMap.at<uchar>(vit_kp->pt.y, vit_kp->pt.x);
+                                if (pixelVal > 0) {
+                                    // 发现是人，直接剔除
+                                    bDelete = true;
+                                }
+
+                                else if (pixelVal > 0 && pixelVal < 255) {
+                                    // 发现是半动态物体（椅子等）
+                                    // 我们把实例 ID (pixelVal) 存进 class_id
+                                    vit_kp->class_id = (int)pixelVal; 
+                                    
+                                    // 保留该点，等待后续几何校验
+                                } 
                             }
                         }
-                    
-                        if (Find) {
-                            // 重要！这里用 continue 直接跳过后面的“椅子检查”和“++vit_kp”
-                            // 因为 vit_kp 已经通过 erase 更新过了
-                            continue; 
+                        else {
+                            // 没有 InstanceMap，直接保留所有点
+                            vit_kp->class_id = 0; 
+                            static int count2 = 0;
+                            if(count2++ % 1000 == 0) std::cout << "DEBUG: mInstanceMap is EMPTY!" << std::endl;
                         }
-                        // else 
-                        // {
-                        //     // std:: cout<<"inside else"<<endl;
-                        //     for (auto vit_area = mvDynamicArea.begin(); vit_area != mvDynamicArea.end(); vit_area++)
-                        //     {
-                        //         Find = false;
-                        //         if (vit_area->contains(vit_kp->pt))
-                        //         {
-                        //             Find = true;
-                        //             vit_kp = vToDistributeKeys.erase(vit_kp);
-                        //             std::cout<<"Erased"<<std::endl;
-                        //             break;
-                        //         }
-                        //     }
-                        // }
-
-                        for (auto it = mvCandidateMask.begin(); it != mvCandidateMask.end(); it++) {
-                            if (it->at<uchar>(vit_kp->pt.y, vit_kp->pt.x) == 255) { // 检查像素是否为白色（动态物体）
-                                vit_kp->class_id = 42; // 42 代表“待几何检查”
-                                break;
-                            }
+                        if(bDelete) 
+                        {
+                            // 核心修复：erase 返回下一个有效的迭代器，并更新 vit_kp
+                            vit_kp = vToDistributeKeys.erase(vit_kp); 
+                        } 
+                        else 
+                        {
+                            // 只有没删除时，才手动自增移动到下一个元素
+                            ++vit_kp; 
+                            static int count2 = 0;
+                            if(count2++ % 1000 == 0) std::cout << "DEBUG: ok" << std::endl;
                         }
-
-                        ++vit_kp;
+                        
                     }
 
                                       

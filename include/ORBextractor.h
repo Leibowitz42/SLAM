@@ -84,6 +84,7 @@ public:
     std::vector<cv::Rect2i> mvDynamicArea;
     std::vector<cv::Mat> mvDynamicMask;
     std::vector<cv::Mat> mvCandidateMask;
+    cv::Mat mInstanceMap; // 声明一个静态变量，所有实例共用
 
 protected:
 
