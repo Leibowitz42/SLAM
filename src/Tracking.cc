@@ -1472,7 +1472,7 @@ namespace ORB_SLAM3
         //mask to orbextractor
         mpORBextractorLeft->mvDynamicMask = mpDetector->mvDynamicMask;
         mpORBextractorLeft->mInstanceMap = mpDetector->mInstanceMap.clone();
-        std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
+        //std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
         {
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
             //semantic infor to viewer
@@ -2042,7 +2042,90 @@ namespace ORB_SLAM3
             }
 
             if (bOK)
+            {
                 mState = OK;
+                // 2. 插入你的“椅子搬动检测”逻辑
+                int beforeCount = mpAtlas->GetCurrentMap()->GetAllMapPoints().size();
+                if(!mpDetector->mInstanceMap.empty()) // 确保 Mask 还在
+                {
+                    mCurrentInstanceMap = mpDetector->mInstanceMap.clone();
+                    std::map<int, std::pair<int, int>> instanceStats; // <ID, <总数, 坏点数>>
+                    // 检查分辨率对齐
+                    // int frameWidth = mCurrentFrame.mnMaxX;
+                    // int frameHeight = mCurrentFrame.mnMaxY;
+                    // std::cout << "Frame Size: " << "Frame Size: " << frameWidth << "x" << frameHeight 
+                    //         << " | Mask Size: " << mCurrentInstanceMap.cols << "x" << mCurrentInstanceMap.rows << std::endl;
+
+                    // 2. 检查 Mask 里的像素值到底是多少
+                    // double minVal, maxVal;
+                    // cv::minMaxLoc(mCurrentInstanceMap, &minVal, &maxVal);
+                    // std::cout << "Mask MinVal: " << minVal << " | MaxVal: " << maxVal << std::endl;
+                    
+                    // 第一遍遍历：统计每把椅子的坏点比例
+                    for (int i = 0; i < mCurrentFrame.N; i++) {
+                        if (!mCurrentFrame.mvpMapPoints[i]) continue;
+
+                        int x = cvRound(mCurrentFrame.mvKeysUn[i].pt.x);
+                        int y = cvRound(mCurrentFrame.mvKeysUn[i].pt.y);
+
+                        if (x >= 0 && x < mCurrentInstanceMap.cols && y >= 0 && y < mCurrentInstanceMap.rows) {
+                            int instanceID = (int)mCurrentInstanceMap.at<uchar>(y, x);
+                            
+                            if (instanceID > 0 && instanceID < 255) { // 属于某把椅子
+                                instanceStats[instanceID].first++;
+                                if (mCurrentFrame.mvbOutlier[i]) {
+                                    instanceStats[instanceID].second++;
+                                }
+                            }
+                        }
+                    }
+
+                    // 第二遍遍历：如果某把椅子动了，执行“死刑”
+                    //int chairsFound = 0;
+                    for (auto const& [id, stats] : instanceStats) {
+                        float ratio = (float)stats.second / stats.first;
+
+                        if (stats.first > 10 && ratio > 0.8) { 
+                            mMoveConfirmCnt[id]++; // 增加该椅子的移动计数
+                            // 关键：实时打印每把椅子的状态
+                            std::cout << "DEBUG: 椅子 ID=" << id 
+                                    << " | 总点数=" << stats.first 
+                                    << " | 坏点数=" << stats.second 
+                                    << " | 比例=" << ratio << std::endl;
+                        } else {
+                            mMoveConfirmCnt[id] = 0; // 一旦某一帧正常，计数清零
+                        }
+
+                        if (mMoveConfirmCnt[id] > 3) {
+                            // 执行 SetBadFlag()...
+                            std::cout << ">>> 确认移动！连续多帧判定成功，删除 ID: " << id << std::endl;
+                            for (int i = 0; i < mCurrentFrame.N; i++) {
+                                int x = cvRound(mCurrentFrame.mvKeysUn[i].pt.x);
+                                int y = cvRound(mCurrentFrame.mvKeysUn[i].pt.y);
+                                if (x >= 0 && x < mCurrentInstanceMap.cols && y >= 0 && y < mCurrentInstanceMap.rows &&
+                                    (int)mCurrentInstanceMap.at<uchar>(y, x) == id) {
+
+                                    // 彻底删除该椅子关联的所有旧地图点
+                                    if (mCurrentFrame.mvpMapPoints[i]) {
+                                        mCurrentFrame.mvpMapPoints[i]->SetBadFlag();
+                                        mCurrentFrame.mvpMapPoints[i] = static_cast<MapPoint*>(NULL);
+                                        mCurrentFrame.mvbOutlier[i] = true;
+                                    }
+                                }
+                                std::cout << ">>> 检测到移动物体，清除 ID: " << id << " 的地图点, 坏点率: " << ratio << std::endl;
+                            }
+                        }
+                        // int afterCount = mpAtlas->GetCurrentMap()->GetAllMapPoints().size();
+                        // if (beforeCount != afterCount) {
+                        //     std::cout << ">>> 验证成功: 地图点从 " << beforeCount << " 减少到 " << afterCount << std::endl;
+                        // }
+                    }
+                    //if(chairsFound == 0) std::cout << "DEBUG: 当前帧没发现任何椅子 ID" << std::endl;
+                }
+                else {
+                    mCurrentInstanceMap = cv::Mat(); // 设为空
+                }
+            }
             else if (mState == OK)
             {
                 if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
@@ -2828,6 +2911,8 @@ namespace ORB_SLAM3
                     nmatchesMap++;
             }
         }
+        
+        
 
         if (mbOnlyTracking)
         {

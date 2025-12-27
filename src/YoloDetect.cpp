@@ -56,10 +56,9 @@ bool YoloDetection::Detect()
     }
     std::vector<OutputParams> result;
     mInstanceMap = cv::Mat::zeros(image.size(), CV_8UC1);
-    objectMask = cv::Mat::zeros(image.size(), CV_8UC1);
-    // std:: cout<< "objectMask size: " << objectMask.size() << " image size: " << image.size() << endl;
     if (model.OnnxDetect(image, result)) {
         mask = cv::Mat::zeros(image.size(), CV_8UC3);
+        mInstanceMap.setTo(0); // 彻底清空
         int candidateID = 1; // 给半动态物体的起始 ID (1-250)
         for (int i = 0; i < result.size(); i++) {
             int left, top;
@@ -81,16 +80,19 @@ bool YoloDetection::Detect()
             if (result[i].boxMask.rows && result[i].boxMask.cols > 0){
                 mask(result[i].box).setTo(color[result[i].id], result[i].boxMask);
             }
+            if (result[i].box.width <= 0 || result[i].box.height <= 0 || result[i].boxMask.empty())
+                continue;
             // 检查当前物体的类别名称是否在“预设动态物体列表(mvDynamicNames)”中
             if (count(mvDynamicNames.begin(), mvDynamicNames.end(), model._className[result[i].id])){
                 mInstanceMap(result[i].box).setTo(cv::Scalar(255), result[i].boxMask);
             }
             else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), model._className[result[i].id])){
-                // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 255 (白色)
+                // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 id
+                //std::cout << "Assigning ID " << candidateID << " to " << model._className[result[i].id] << std::endl;
                 mInstanceMap(result[i].box).setTo(cv::Scalar(candidateID), result[i].boxMask);
                 // 增加 ID，确保下一把椅子有不同的编号
                 candidateID++; 
-                if(candidateID >= 255) candidateID = 254; // 防止溢出
+                if(candidateID >= 250) candidateID = 249; // 防止溢出
             }
             
             // 3. 统计映射（保持原样，供 Viewer 使用）

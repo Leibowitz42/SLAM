@@ -109,6 +109,8 @@ public:
     void SaveSubTrajectory(string strNameFile_frames, string strNameFile_kf, Map* pMap);
 
     float GetImageScale();
+    cv::Mat mCurrentInstanceMap;
+    std::map<int, int> mMoveConfirmCnt;
 
 #ifdef REGISTER_LOOP
     void RequestStop();

@@ -891,7 +891,7 @@ namespace ORB_SLAM3
                             {
                                 // 直接在 InstanceMap 采样
                                 uchar pixelVal = mInstanceMap.at<uchar>(vit_kp->pt.y, vit_kp->pt.x);
-                                if (pixelVal > 0) {
+                                if (pixelVal == 255) {
                                     // 发现是人，直接剔除
                                     bDelete = true;
                                 }
@@ -920,8 +920,8 @@ namespace ORB_SLAM3
                         {
                             // 只有没删除时，才手动自增移动到下一个元素
                             ++vit_kp; 
-                            static int count2 = 0;
-                            if(count2++ % 1000 == 0) std::cout << "DEBUG: ok" << std::endl;
+                            // static int count2 = 0;
+                            // if(count2++ % 1000 == 0) std::cout << "DEBUG: ok" << std::endl;
                         }
                         
                     }
