@@ -1462,7 +1462,6 @@ namespace ORB_SLAM3
     {
         mImGray = imRGB;
         cv::Mat imDepth = imD;
-
         // Yolo11
         cv::Mat InputImage;
         InputImage = imRGB.clone();
@@ -1470,8 +1469,8 @@ namespace ORB_SLAM3
         mpDetector->GetImage(InputImage);
         mpDetector->Detect();
         //mask to orbextractor
-        mpORBextractorLeft->mvDynamicMask = mpDetector->mvDynamicMask;
-        mpORBextractorLeft->mInstanceMap = mpDetector->mInstanceMap.clone();
+        //mpORBextractorLeft->mvDynamicMask = mpDetector->mvDynamicMask;
+        mpORBextractorLeft->mInstanceMap = mpDetector->mInstanceMap.clone(); 
         //std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
         {
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
@@ -1505,15 +1504,57 @@ namespace ORB_SLAM3
 
         mCurrentFrame.mNameFile = filename;
         mCurrentFrame.mnDataset = mnNumDataset;
-
+        // 当你得到当前帧 mCurrentFrame 后
+        mCurrentFrame.mInstanceMap = mpDetector->mInstanceMap.clone(); 
 #ifdef REGISTER_TIMES
         vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
 #endif
 
         Track();
 
+        // 2. 在清除数据前，执行几何检测
+        if(mState == OK) { 
+            // 1. 建立统计桶：记录每个 Instance ID 关联了哪些特征点
+            // Key: id, Value: 特征点索引 i 的列表
+            std::map<uchar, std::vector<int>> instanceFeatureMapping;
+            
+            for(int i = 0; i < mCurrentFrame.N; i++) {
+                int u_f = cvRound(mCurrentFrame.mvKeysUn[i].pt.x);
+                int v_f = cvRound(mCurrentFrame.mvKeysUn[i].pt.y);
+                
+                // 边界保护
+                if(u_f >= 0 && u_f < mCurrentFrame.mInstanceMap.cols && v_f >= 0 && v_f < mCurrentFrame.mInstanceMap.rows) {
+                    uchar id = mCurrentFrame.mInstanceMap.at<uchar>(v_f, u_f);
+                    if(id > 0 && id < 255) { // 属于椅子的 ID
+                        instanceFeatureMapping[id].push_back(i);
+                    }
+                }
+            }
+
+            // 2. 针对每个出现在当前帧的椅子 ID，进行动态判定
+            for(auto const& [id, featureIndices] : instanceFeatureMapping) {
+                
+                // 调用 CheckInstanceDynamic。内部应该利用多视角几何对比投影位置
+                // 如果你还没写好 CheckInstanceDynamic，它应该利用当前帧的特征点深度 vs 投影深度
+                bool isDynamic = CheckInstanceDynamic(mCurrentFrame, id);
+                
+                if(isDynamic) {
+                    // 3. 连坐制度：只要判定该 ID 动了，直接剔除关联的所有特征点
+                    for(int idx : featureIndices) {
+                        mCurrentFrame.mvbOutlier[idx] = true;
+                        if(mCurrentFrame.mvpMapPoints[idx]) {
+                            mCurrentFrame.mvpMapPoints[idx]->SetBadFlag();
+                            mCurrentFrame.mvpMapPoints[idx] = static_cast<MapPoint*>(NULL);
+                        }
+                    }
+                    cout << "[Dyna-Logic] Instance ID " << (int)id 
+                        << " (Chair) is DYNAMIC. Removed " << featureIndices.size() << " points." << endl;
+                }
+            }
+        }
+
         //clear
-        mpDetector->mvDynamicArea.clear();
+        //mpDetector->mvDynamicArea.clear();
         //mpDetector->mInstanceMap.release();
         mpDetector->mmDetectMap.clear();
         mpDetector->mask.release();
@@ -2044,87 +2085,6 @@ namespace ORB_SLAM3
             if (bOK)
             {
                 mState = OK;
-                // 2. 插入你的“椅子搬动检测”逻辑
-                int beforeCount = mpAtlas->GetCurrentMap()->GetAllMapPoints().size();
-                if(!mpDetector->mInstanceMap.empty()) // 确保 Mask 还在
-                {
-                    mCurrentInstanceMap = mpDetector->mInstanceMap.clone();
-                    std::map<int, std::pair<int, int>> instanceStats; // <ID, <总数, 坏点数>>
-                    // 检查分辨率对齐
-                    // int frameWidth = mCurrentFrame.mnMaxX;
-                    // int frameHeight = mCurrentFrame.mnMaxY;
-                    // std::cout << "Frame Size: " << "Frame Size: " << frameWidth << "x" << frameHeight 
-                    //         << " | Mask Size: " << mCurrentInstanceMap.cols << "x" << mCurrentInstanceMap.rows << std::endl;
-
-                    // 2. 检查 Mask 里的像素值到底是多少
-                    // double minVal, maxVal;
-                    // cv::minMaxLoc(mCurrentInstanceMap, &minVal, &maxVal);
-                    // std::cout << "Mask MinVal: " << minVal << " | MaxVal: " << maxVal << std::endl;
-                    
-                    // 第一遍遍历：统计每把椅子的坏点比例
-                    for (int i = 0; i < mCurrentFrame.N; i++) {
-                        if (!mCurrentFrame.mvpMapPoints[i]) continue;
-
-                        int x = cvRound(mCurrentFrame.mvKeysUn[i].pt.x);
-                        int y = cvRound(mCurrentFrame.mvKeysUn[i].pt.y);
-
-                        if (x >= 0 && x < mCurrentInstanceMap.cols && y >= 0 && y < mCurrentInstanceMap.rows) {
-                            int instanceID = (int)mCurrentInstanceMap.at<uchar>(y, x);
-                            
-                            if (instanceID > 0 && instanceID < 255) { // 属于某把椅子
-                                instanceStats[instanceID].first++;
-                                if (mCurrentFrame.mvbOutlier[i]) {
-                                    instanceStats[instanceID].second++;
-                                }
-                            }
-                        }
-                    }
-
-                    // 第二遍遍历：如果某把椅子动了，执行“死刑”
-                    //int chairsFound = 0;
-                    for (auto const& [id, stats] : instanceStats) {
-                        float ratio = (float)stats.second / stats.first;
-
-                        if (stats.first > 10 && ratio > 0.8) { 
-                            mMoveConfirmCnt[id]++; // 增加该椅子的移动计数
-                            // 关键：实时打印每把椅子的状态
-                            std::cout << "DEBUG: 椅子 ID=" << id 
-                                    << " | 总点数=" << stats.first 
-                                    << " | 坏点数=" << stats.second 
-                                    << " | 比例=" << ratio << std::endl;
-                        } else {
-                            mMoveConfirmCnt[id] = 0; // 一旦某一帧正常，计数清零
-                        }
-
-                        if (mMoveConfirmCnt[id] > 3) {
-                            // 执行 SetBadFlag()...
-                            std::cout << ">>> 确认移动！连续多帧判定成功，删除 ID: " << id << std::endl;
-                            for (int i = 0; i < mCurrentFrame.N; i++) {
-                                int x = cvRound(mCurrentFrame.mvKeysUn[i].pt.x);
-                                int y = cvRound(mCurrentFrame.mvKeysUn[i].pt.y);
-                                if (x >= 0 && x < mCurrentInstanceMap.cols && y >= 0 && y < mCurrentInstanceMap.rows &&
-                                    (int)mCurrentInstanceMap.at<uchar>(y, x) == id) {
-
-                                    // 彻底删除该椅子关联的所有旧地图点
-                                    if (mCurrentFrame.mvpMapPoints[i]) {
-                                        mCurrentFrame.mvpMapPoints[i]->SetBadFlag();
-                                        mCurrentFrame.mvpMapPoints[i] = static_cast<MapPoint*>(NULL);
-                                        mCurrentFrame.mvbOutlier[i] = true;
-                                    }
-                                }
-                                std::cout << ">>> 检测到移动物体，清除 ID: " << id << " 的地图点, 坏点率: " << ratio << std::endl;
-                            }
-                        }
-                        // int afterCount = mpAtlas->GetCurrentMap()->GetAllMapPoints().size();
-                        // if (beforeCount != afterCount) {
-                        //     std::cout << ">>> 验证成功: 地图点从 " << beforeCount << " 减少到 " << afterCount << std::endl;
-                        // }
-                    }
-                    //if(chairsFound == 0) std::cout << "DEBUG: 当前帧没发现任何椅子 ID" << std::endl;
-                }
-                else {
-                    mCurrentInstanceMap = cv::Mat(); // 设为空
-                }
             }
             else if (mState == OK)
             {
@@ -3322,6 +3282,98 @@ namespace ORB_SLAM3
         mpLastKeyFrame = pKF;
     }
 
+    bool Tracking::CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID) {
+        // 1. 获取参考关键帧及共视邻居 (最多 5 个)
+        KeyFrame* pRefKF = CurrentFrame.mpReferenceKF;
+        if(!pRefKF) return false;
+        vector<KeyFrame*> vpNeighKFs = pRefKF->GetBestCovisibilityKeyFrames(5);
+        vpNeighKFs.push_back(pRefKF); 
+
+        // 获取当前帧位姿和相机中心
+        Sophus::SE3f Tcw = CurrentFrame.GetPose();
+        Eigen::Vector3f Ow = Tcw.inverse().translation(); 
+
+        int dynamic_votes = 0;
+        int total_valid_samples = 0;
+
+        // 2. 在椅子 Mask 内随机采样像素点
+        for (int i = 0; i < mLastFrame.N; i++) {
+            int u = cvRound(mLastFrame.mvKeysUn[i].pt.x);
+            int v = cvRound(mLastFrame.mvKeysUn[i].pt.y);
+
+            if(mLastFrame.mInstanceMap.at<uchar>(v,u) != InstanceID) continue;
+
+            float z_curr = mLastFrame.mvDepth[i];
+            if(z_curr <= 0) continue;
+
+            // 当前点反投影到世界坐标 Pw
+            Eigen::Vector3f Pc((u-mCurrentFrame.fx)*z_curr/mCurrentFrame.fy, (v-mCurrentFrame.fy)*z_curr/mCurrentFrame.fy, z_curr);
+            Eigen::Vector3f Pw = Tcw.inverse() * Pc;
+
+            int frame_dynamic_count = 0;
+            int frame_check_count = 0;
+
+            // 3. 遍历多个参考关键帧进行交叉验证
+            for(KeyFrame* pKF : vpNeighKFs) {
+                if(!pKF || pKF->isBad()) continue;
+                
+                Eigen::Vector3f Ow_kf = pKF->GetCameraCenter();
+                
+                // --- 视差角筛选 ---
+                Eigen::Vector3f v_cf = Pw - Ow;
+                Eigen::Vector3f vec_kf_dir = Pw - Ow_kf;
+                float cos_theta = v_cf.dot(vec_kf_dir) / (v_cf.norm() * vec_kf_dir.norm());
+                if(cos_theta < 0.866) continue; // 视差角 > 30度，跳过防止遮挡干扰
+
+                // --- 重投影 ---
+                Eigen::Vector3f P_in_kf = pKF->GetPose() * Pw;
+                float z_proj = P_in_kf.z();
+                int u_kf = round(P_in_kf.x() * pKF->fx / z_proj + pKF->cx);
+                int v_proj_kf = cvRound(P_in_kf.y() * pKF->fy / z_proj + pKF->cy);
+
+                // if(u_kf >= 0 && u_kf < pKF->mImDepth.cols && v_proj_kf >= 0 && v_proj_kf < pKF->mImDepth.rows) {
+                //     float z_kf_obs = pKF->mvDepth[i].at<float>(v_proj_kf, u_kf);
+                //     if(z_kf_obs <= 0) continue;
+
+                //     // --- 深度方差校核 ---
+                //     float sigma = sqrt(GetDepthVariance(pKF->GetDepthMap(), u_kf, v_proj_kf));
+                //     float dz = std::abs(z_proj - z_kf_obs);
+
+                //     // 最终判定：偏差大于 10cm 且显著大于局部深度噪声
+                //     if(dz > 0.1 && dz > 3 * sigma) {
+                //         frame_dynamic_count++;
+                //     }
+                //     frame_check_count++;
+                // }
+            }
+
+            if(frame_check_count > 0) {
+                total_valid_samples++;
+                // 如果在过半数的参考帧中都被判定为动，则该点投一票“动态”
+                if(frame_dynamic_count > frame_check_count / 2) dynamic_votes++;
+            }
+        }
+
+        // 4. 实例级投票结果
+        if(total_valid_samples == 0) return false;
+        return (float)dynamic_votes / total_valid_samples > 0.3; // 30% 以上点动，判定整把椅子在动
+    }
+
+    // 辅助函数：计算 Patch 方差
+    float Tracking::GetDepthVariance(cv::Mat& imgDepth, int u, int v) {
+        float sum = 0, sum2 = 0;
+        int count = 0;
+        for(int i=-1; i<=1; i++) {
+            for(int j=-1; j<=1; j++) {
+                float d = imgDepth.at<float>(v+j, u+i);
+                if(d > 0) {
+                    sum += d; sum2 += d*d; count++;
+                }
+            }
+        }
+        if(count <= 1) return 0.01; // 默认小噪声
+        return (sum2 / count) - (sum / count) * (sum / count);
+    }
     void Tracking::SearchLocalPoints()
     {
         // Do not search map points already matched

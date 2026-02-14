@@ -90,6 +90,8 @@ Frame::Frame(const Frame &frame)
 
     mmProjectPoints = frame.mmProjectPoints;
     mmMatchedInImage = frame.mmMatchedInImage;
+    // 必须加上这一行，否则优化器在处理关键帧时找不到掩码
+    mInstanceMap = frame.mInstanceMap.clone();
 
 #ifdef REGISTER_TIMES
     mTimeStereoMatch = frame.mTimeStereoMatch;
@@ -205,6 +207,9 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
 {
     // Frame ID
     mnId=nNextId++;
+
+    // 确保初始化为空
+    mInstanceMap = cv::Mat();
 
     // Scale Level Info
     mnScaleLevels = mpORBextractorLeft->GetLevels();

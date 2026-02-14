@@ -813,6 +813,87 @@ void Optimizer::FullInertialBA(Map *pMap, int its, const bool bFixLocal, const l
 
 int Optimizer::PoseOptimization(Frame *pFrame)
 {
+    // --- 注入：基于实例 ID 分组采样的深度一致性检测 ---
+
+    // 1. 定义存储结构：Key 是灰度 ID，Value 是 <动态点数, 总采样点数>
+    // std::map<int, int> instanceTotal;
+    // std::map<int, int> instanceMoving;
+
+    // // 获取位姿预测（用于补偿相机运动带来的深度变化）
+    // // 2. 第一遍：像素级采样投票
+    // int totalInMask = 0;
+    // for (int i = 0; i < pFrame->N; i++) {
+    //     MapPoint* pMP = pFrame->mvpMapPoints[i];
+    //     if (!pMP) continue; // 如果这个特征点没有对应的地图点，跳过
+
+    //     int u = static_cast<int>(pFrame->mvKeysUn[i].pt.x);
+    //     int v = static_cast<int>(pFrame->mvKeysUn[i].pt.y);
+    //     unsigned char id = pFrame->mInstanceMap.at<unsigned char>(v, u);
+            
+    //     // 只针对椅子 ID 进行处理 (假设你定义椅子 ID 区间为 1-254)
+    //     if (id > 0 && id < 255) {
+    //         totalInMask++;
+    //         float z_obs = pFrame->mvDepth[i]; // vector 直接用 [] 访问，极快！
+    //         if (z_obs <= 0) continue;
+    //         if(totalInMask == 1) {
+    //             cout << "Found Chair Mask! ID: " << (int)id << " Depth: " << z_obs << endl;
+    //         }
+
+    //         // --- 核心：深度一致性判定 ---
+    //         // 2. 计算该点基于地图位置的“预期深度”
+    //         // 将地图点的世界坐标 Pw 转换到当前相机坐标系 Pc
+    //         Eigen::Vector3f Pw = pMP->GetWorldPos();
+    //         // 2. 获取当前帧的位姿 Tcw (Sophus SE3 格式)
+    //         Sophus::SE3f Tcw = pFrame->GetPose();
+    //         // 3. 将世界点投影到相机坐标系: Pc = R*Pw + t
+    //         // Eigen 的语法非常直观，直接用 * 乘法即可
+    //         Eigen::Vector3f Pc = Tcw * Pw;
+    //         // Pc.z() 就是该点在当前相机系下的“理论深度”
+    //         float z_pred = Pc.z();
+
+    //         instanceTotal[id]++; // 该 ID 总采样数 +1
+            
+    //         if (std::abs(z_obs - z_pred) > 0.08) { 
+    //             cout << std::abs(z_obs - z_pred) << endl;
+    //             instanceMoving[id]++; // 该 ID 动态点数 +1
+    //         }
+    //     }
+
+    // }
+    // if(totalInMask == 0) {
+    //     cout << "Warning: No chair pixels found in InstanceMap!" << endl;
+    // }
+
+    // // 3. 第二遍：分析每个实例的状态，确定哪些 ID 需要被拉黑
+    // std::set<unsigned char> movingInstances;
+    // for (auto const& item : instanceTotal) {
+    //     unsigned char id = item.first;
+    //     int total = item.second;
+    //     if (total > 5) {
+    //         float moveRatio = (float)instanceMoving[id] / total;
+    //         // 判定准则：动点比例超标，或者采样点少但动点确凿
+    //         if (moveRatio > 0.4) {
+    //             movingInstances.insert(id);
+    //             cout << "ID " << (int)id << " 判定为动态，比例: " << moveRatio << endl;
+    //         }
+    //     }
+    // }
+
+    // // 4. 第三遍：精准执行“连坐”剔除
+    // if (!movingInstances.empty()) {
+    //     for (int i = 0; i < pFrame->N; i++) {
+    //         // 获取特征点所在像素的 ID
+    //         uchar keyId = pFrame->mInstanceMap.at<uchar>(pFrame->mvKeysUn[i].pt.y, pFrame->mvKeysUn[i].pt.x);
+            
+    //         if (movingInstances.count(keyId)) {
+    //             // 该特征点属于正在移动的椅子实例，彻底干掉
+    //             pFrame->mvbOutlier[i] = true;
+    //             pFrame->mvpMapPoints[i] = static_cast<MapPoint*>(NULL);
+    //             // cout << "ID "<< endl;
+    //         }
+    //     }
+    // }
+    // --- 注入结束 ---
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolver_6_3::LinearSolverType * linearSolver;
 

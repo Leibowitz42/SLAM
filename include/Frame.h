@@ -128,6 +128,9 @@ public:
 
     bool isSet() const;
 
+    cv::Mat mInstanceMap; // 声明一个静态变量，所有实例共用
+    std::map<unsigned char, float> mLastChairDepth;
+
     // Computes rotation, translation and camera center matrices from the camera pose.
     void UpdatePoseMatrices();
 

@@ -82,6 +82,11 @@ public:
     void SetDetector(YoloDetection* pDetector);
     void SetStepByStep(bool bSet);
     bool GetStepByStep();
+    // 传入当前帧和需要检测的实例 ID
+    bool CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID);
+    
+    // 辅助函数：计算 Patch 深度方差
+    float GetDepthVariance(cv::Mat& imgDepth, int u, int v);
 
     // Load new settings
     // The focal lenght should be similar or scale prediction will fail when projecting points
@@ -111,6 +116,7 @@ public:
     float GetImageScale();
     cv::Mat mCurrentInstanceMap;
     std::map<int, int> mMoveConfirmCnt;
+    cv::Mat mPrevDepth;
 
 #ifdef REGISTER_LOOP
     void RequestStop();
