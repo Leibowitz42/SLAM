@@ -19,10 +19,14 @@
 #include "FrameDrawer.h"
 #include "Tracking.h"
 
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
+#include<opencv2/core/core.hpp>
+#include<opencv2/highgui/highgui.hpp>
+#include<opencv2/imgproc/imgproc.hpp>
 
 #include<mutex>
+#include<set>
+#include<string>
+
 
 namespace ORB_SLAM3
 {
@@ -34,13 +38,32 @@ FrameDrawer::FrameDrawer(Atlas* pAtlas):both(false),mpAtlas(pAtlas)
     mImRight = cv::Mat(480,640,CV_8UC3, cv::Scalar(0,0,0));
 }
 
+// 根据实例ID生成颜色
+// 动态实例：红色
+// 半动态实例（椅子、书本等）：黄色（固定）
+// 静态背景：绿色
+cv::Scalar FrameDrawer::GetInstanceColor(int instanceID, bool isDynamic)
+{
+    if (isDynamic) {
+        return cv::Scalar(0, 0, 255);  // 红色表示动态
+    }
+    
+    if (instanceID <= 0 || instanceID >= 255) {
+        return cv::Scalar(0, 255, 0);  // 绿色表示静态背景
+    }
+    
+    // 半动态物体统一使用黄色（易于识别）
+    return cv::Scalar(0, 255, 255);  // 黄色 (BGR: 0, 255, 255)
+}
+
+
 cv::Mat FrameDrawer::DrawFrame(float imageScale)
 {
     cv::Mat im;
     vector<cv::KeyPoint> vIniKeys; // Initialization: KeyPoints in reference frame
     vector<int> vMatches; // Initialization: correspondeces with reference keypoints
     vector<cv::KeyPoint> vCurrentKeys; // KeyPoints in current frame
-    vector<bool> vbVO, vbMap; // Tracked MapPoints in current frame
+    vector<bool> vbVO, vbMap, vbDynamic; // Tracked MapPoints in current frame
     vector<pair<cv::Point2f, cv::Point2f> > vTracks;
     int state; // Tracking state
     vector<float> vCurrentDepth;
@@ -79,6 +102,8 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
             vCurrentKeys = mvCurrentKeys;
             vbVO = mvbVO;
             vbMap = mvbMap;
+            vbDynamic = mvbDynamic;
+
 
             currentFrame = mCurrentFrame;
             vpLocalMap = mvpLocalMap;
@@ -155,7 +180,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
         int n = vCurrentKeys.size();
         for(int i=0;i<n;i++)
         {
-            if(vbVO[i] || vbMap[i])
+            if(vbVO[i] || vbMap[i] || vbDynamic[i])
             {
                 cv::Point2f pt1,pt2;
                 cv::Point2f point;
@@ -178,11 +203,55 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
                     pt2.y=vCurrentKeys[i].pt.y+r;
                 }
 
+
                 // This is a match to a MapPoint in the map
-                if(vbMap[i])
+                if(vbDynamic[i]) // Dynamic point (Red)
                 {
-                    cv::rectangle(im,pt1,pt2,standardColor);
-                    cv::circle(im,point,2,standardColor,-1);
+                    cv::circle(im,point,2,cv::Scalar(0,0,255),-1);
+                }
+                else if(vbMap[i])
+                {
+                    // 获取MapPoint的实例ID
+                    MapPoint* pMP = currentFrame.mvpMapPoints[i];
+                    int instanceID = -1;
+                    bool isDynamic = false;
+                    
+                    if (pMP && !pMP->isBad()) {
+                        instanceID = pMP->GetInstanceID();
+                        
+                        // 检查是否在当前帧的InstanceMap中
+                        int u = cvRound(vCurrentKeys[i].pt.x);
+                        int v = cvRound(vCurrentKeys[i].pt.y);
+                        if (!currentFrame.mInstanceMap.empty() && 
+                            u >= 0 && v >= 0 && 
+                            u < currentFrame.mInstanceMap.cols && 
+                            v < currentFrame.mInstanceMap.rows) {
+                            uchar id = currentFrame.mInstanceMap.at<uchar>(v, u);
+                            if (id > 0 && id < 255) {
+                                instanceID = id;
+                            }
+                        }
+                    }
+                    
+                    // 根据实例ID选择颜色
+                    cv::Scalar color;
+                    if (instanceID > 0 && instanceID < 255) {
+                        color = GetInstanceColor(instanceID, isDynamic);
+                    } else {
+                        color = standardColor;  // 默认绿色（静态背景）
+                    }
+                    
+                    cv::rectangle(im,pt1,pt2,color);
+                    cv::circle(im,point,2,color,-1);
+                    
+                    // 显示实例ID（仅对半动态物体）
+                    if (instanceID > 0 && instanceID < 255) {
+                        std::string idText = std::to_string(instanceID);
+                        cv::putText(im, idText, 
+                                   cv::Point(point.x + 8, point.y - 8),
+                                   cv::FONT_HERSHEY_SIMPLEX, 0.4, color, 1);
+                    }
+                    
                     mnTracked++;
                 }
                 else // This is match to a "visual odometry" MapPoint created in the last frame
@@ -191,6 +260,7 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
                     cv::circle(im,point,2,odometryColor,-1);
                     mnTrackedVO++;
                 }
+
             }
         }
     }
@@ -347,6 +417,23 @@ void FrameDrawer::DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText)
         s << "Maps: " << nMaps << ", KFs: " << nKFs << ", MPs: " << nMPs << ", Matches: " << mnTracked;
         if(mnTrackedVO>0)
             s << ", + VO matches: " << mnTrackedVO;
+        
+        // 统计当前帧中的实例数量
+        if (!mCurrentFrame.mInstanceMap.empty()) {
+            std::set<int> uniqueInstances;
+            for (int i = 0; i < mCurrentFrame.N; i++) {
+                MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
+                if (pMP && !pMP->isBad()) {
+                    int instanceID = pMP->GetInstanceID();
+                    if (instanceID > 0 && instanceID < 255) {
+                        uniqueInstances.insert(instanceID);
+                    }
+                }
+            }
+            if (!uniqueInstances.empty()) {
+                s << " | Instances: " << uniqueInstances.size();
+            }
+        }
     }
     else if(nState==Tracking::LOST)
     {
@@ -386,6 +473,8 @@ void FrameDrawer::Update(Tracking *pTracker)
 
     mvbVO = vector<bool>(N,false);
     mvbMap = vector<bool>(N,false);
+    mvbDynamic = pTracker->mCurrentFrame.mvbDynamic;
+    if(mvbDynamic.size() < N) mvbDynamic.resize(N, false);
     mbOnlyTracking = pTracker->mbOnlyTracking;
 
     //Variables for the new visualization

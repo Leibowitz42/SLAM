@@ -55,12 +55,16 @@ public:
 protected:
 
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);
+    
+    // 根据实例ID生成颜色（用于可视化不同实例）
+    cv::Scalar GetInstanceColor(int instanceID, bool isDynamic);
 
     // Info of the frame to be drawn
     cv::Mat mIm, mImRight;
     int N;
     vector<cv::KeyPoint> mvCurrentKeys,mvCurrentKeysRight;
     vector<bool> mvbMap, mvbVO;
+    vector<bool> mvbDynamic;
     bool mbOnlyTracking;
     int mnTracked, mnTrackedVO;
     vector<cv::KeyPoint> mvIniKeys;

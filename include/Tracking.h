@@ -181,6 +181,13 @@ public:
     double t0IMU; // time-stamp of IMU initialization
     bool mFastInit = false;
 
+    // Check if the current frame is heavily occluded by dynamic objects (e.g. humans)
+    // Check if the current frame is heavily occluded by dynamic objects (e.g. humans)
+    bool IsFrameOccluded(Frame &frame);
+    bool mbEnableOcclusionFilter; // Flag to enable/disable occlusion filter (loaded from settings)
+    bool mbEnableDynamicRemoval; // Flag to enable/disable dynamic object removal
+
+
 
     vector<MapPoint*> GetLocalMapMPS();
 

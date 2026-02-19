@@ -42,6 +42,40 @@ public:
     cv::Mat objectMask;
     cv::Mat mInstanceMap;
 
+private:
+    // ========== 实例跟踪器 ==========
+    // 用于为每个物体实例分配稳定的全局ID，解决多实例独立判定问题
+    
+    struct TrackedInstance {
+        int globalID;               // 全局唯一ID（跨帧稳定）
+        cv::Rect2f bbox;            // 边界框
+        std::string className;      // 类别名称
+        int framesSinceLastSeen;    // 未见到的帧数（用于处理遮挡）
+        
+        TrackedInstance() : globalID(-1), framesSinceLastSeen(0) {}
+    };
+    
+    std::vector<TrackedInstance> mTrackedInstances;  // 已跟踪的实例列表
+    int mNextGlobalID;  // 下一个可用的全局ID
+    
+    // ========== ID回收机制 ==========
+    // 限制ID范围在1-250之间（255保留给绝对动态物体）
+    static const int MAX_INSTANCE_ID = 250;
+    std::set<int> mAvailableIDs;  // 可用的ID池（已回收的ID）
+    
+    // 分配新ID（优先使用回收的ID）
+    int AllocateInstanceID();
+    
+    // 回收ID（当实例被删除时）
+    void RecycleInstanceID(int id);
+    
+    // 计算两个边界框的IoU（交并比）
+    float ComputeIoU(const cv::Rect2f& box1, const cv::Rect2f& box2);
+    
+    // 更新实例跟踪器，返回每个检测的稳定全局ID
+    std::vector<int> UpdateInstanceTracker(const std::vector<cv::Rect2f>& bboxes, 
+                                          const std::vector<std::string>& classNames);
+
 };
 
 

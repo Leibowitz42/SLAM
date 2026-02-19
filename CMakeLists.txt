@@ -42,8 +42,8 @@ add_definitions(-w)
 # Set the module path
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 
-set(ONNXRUNTIME_INCLUDE_DIR ~/libs/onnxruntime/include)
-set(ONNXRUNTIME_LIB_DIR ~/libs/onnxruntime/lib)
+set(ONNXRUNTIME_INCLUDE_DIR /home/waitangwen/libs/onnxruntime/include)
+set(ONNXRUNTIME_LIB_DIR /home/waitangwen/libs/onnxruntime/lib)
 
 include_directories(${ONNXRUNTIME_INCLUDE_DIR})
 link_directories(${ONNXRUNTIME_LIB_DIR})

@@ -417,6 +417,10 @@ public:
     string mNameFile;
 
     int mnDataset;
+    
+    // 语义分割掩码，用于对极几何约束检查
+    // ID=0: 静态背景, ID=1-249: 半动态物体(椅子等), ID=255: 绝对动态物体(人等)
+    cv::Mat mInstanceMap;
 
     std::vector <KeyFrame*> mvpLoopCandKFs;
     std::vector <KeyFrame*> mvpMergeCandKFs;

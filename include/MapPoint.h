@@ -156,6 +156,12 @@ public:
     void UpdateMap(Map* pMap);
 
     void PrintObservations();
+    
+    // 获取实例ID
+    inline int GetInstanceID() {
+        return mInstanceID;
+    }
+
 
     void PreSave(set<KeyFrame*>& spKF,set<MapPoint*>& spMP);
     void PostLoad(map<long unsigned int, KeyFrame*>& mpKFid, map<long unsigned int, MapPoint*>& mpMPid);
@@ -206,6 +212,25 @@ public:
     static std::mutex mGlobalMutex;
 
     unsigned int mnOriginMapId;
+    
+    // ========== 语义和动态性标记 ==========
+    // 用于解决Instance ID不稳定的问题（遮挡、重新检测等）
+    
+    // 语义类别：0=静态背景, 1-249=半动态(椅子等), 255=绝对动态(人等)
+    // 初始化时从创建该MapPoint的Frame中获取
+    uchar mSemanticLabel;
+    
+    // ✅ 实例ID：稳定的全局唯一ID，用于区分同类别的不同物体
+    // 例如：两把椅子有不同的mInstanceID，即使mSemanticLabel相同
+    // -1表示未分配或不属于半动态物体
+    int mInstanceID;
+    
+    // 动态性投票计数器：记录该MapPoint被判定为动态的次数
+    // 用于跨帧累积证据，即使Instance ID改变也能保持
+    int mDynamicVotes;
+    
+    // 该MapPoint最后一次被观测到时的语义ID（调试用）
+    uchar mLastSeenInstanceID;
 
 protected:    
 

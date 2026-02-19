@@ -31,7 +31,7 @@ MapPoint::MapPoint():
     mnFirstKFid(0), mnFirstFrame(0), nObs(0), mnTrackReferenceForFrame(0),
     mnLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), mnVisible(1), mnFound(1), mbBad(false),
-    mpReplaced(static_cast<MapPoint*>(NULL))
+    mpReplaced(static_cast<MapPoint*>(NULL)), mSemanticLabel(0), mInstanceID(-1), mDynamicVotes(0), mLastSeenInstanceID(0)
 {
     mpReplaced = static_cast<MapPoint*>(NULL);
 }
@@ -41,7 +41,7 @@ MapPoint::MapPoint(const Eigen::Vector3f &Pos, KeyFrame *pRefKF, Map* pMap):
     mnLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false),
     mpReplaced(static_cast<MapPoint*>(NULL)), mfMinDistance(0), mfMaxDistance(0), mpMap(pMap),
-    mnOriginMapId(pMap->GetId())
+    mnOriginMapId(pMap->GetId()), mSemanticLabel(0), mInstanceID(-1), mDynamicVotes(0), mLastSeenInstanceID(0)
 {
     SetWorldPos(Pos);
 
@@ -60,7 +60,7 @@ MapPoint::MapPoint(const double invDepth, cv::Point2f uv_init, KeyFrame* pRefKF,
     mnLastFrameSeen(0), mnBALocalForKF(0), mnFuseCandidateForKF(0), mnLoopPointForKF(0), mnCorrectedByKF(0),
     mnCorrectedReference(0), mnBAGlobalForKF(0), mpRefKF(pRefKF), mnVisible(1), mnFound(1), mbBad(false),
     mpReplaced(static_cast<MapPoint*>(NULL)), mfMinDistance(0), mfMaxDistance(0), mpMap(pMap),
-    mnOriginMapId(pMap->GetId())
+    mnOriginMapId(pMap->GetId()), mSemanticLabel(0), mInstanceID(-1), mDynamicVotes(0), mLastSeenInstanceID(0)
 {
     mInvDepth=invDepth;
     mInitU=(double)uv_init.x;
@@ -113,6 +113,43 @@ MapPoint::MapPoint(const Eigen::Vector3f &Pos, Map* pMap, Frame* pFrame, const i
     // MapPoints can be created from Tracking and Local Mapping. This mutex avoid conflicts with id.
     unique_lock<mutex> lock(mpMap->mMutexPointCreation);
     mnId=nNextId++;
+    
+    // ========== 初始化语义标签 ==========
+    // 从Frame的语义掩码中提取该特征点的语义类别和实例ID
+    mSemanticLabel = 0;  // 默认为静态背景
+    mInstanceID = -1;    // 默认未分配
+    mDynamicVotes = 0;   // 初始化动态投票为0
+    mLastSeenInstanceID = 0;
+    
+    if(!pFrame->mInstanceMap.empty()) {
+        // 使用原始坐标（mvKeys）查询语义掩码
+        int u = cvRound(pFrame->mvKeys[idxF].pt.x);
+        int v = cvRound(pFrame->mvKeys[idxF].pt.y);
+        
+        if(u >= 0 && v >= 0 && 
+           u < pFrame->mInstanceMap.cols && 
+           v < pFrame->mInstanceMap.rows) {
+            
+            uchar id = pFrame->mInstanceMap.at<uchar>(v, u);
+            
+            if(id > 0 && id < 255) {
+                // 半动态物体（椅子等）
+                mSemanticLabel = id;
+                mInstanceID = id;  // ✅ 存储稳定的实例ID
+                mLastSeenInstanceID = id;
+            } else if(id == 255) {
+                // 绝对动态物体（人等）
+                mSemanticLabel = 255;
+                mInstanceID = -1;  // 不跟踪绝对动态物体的实例
+                mLastSeenInstanceID = 255;
+            } else {
+                // 静态背景
+                mSemanticLabel = 0;
+                mInstanceID = -1;
+                mLastSeenInstanceID = 0;
+            }
+        }
+    }
 }
 
 void MapPoint::SetWorldPos(const Eigen::Vector3f &Pos) {

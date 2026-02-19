@@ -1,4 +1,5 @@
 #include "Tracking.h"
+#include <opencv2/core/eigen.hpp>
 
 #include "ORBmatcher.h"
 #include "FrameDrawer.h"
@@ -104,6 +105,40 @@ namespace ORB_SLAM3
         vdNewKF_ms.clear();
         vdTrackTotal_ms.clear();
 #endif
+    
+        // Load Occlusion Filter setting
+        mbEnableOcclusionFilter = true; // Default
+        mbEnableDynamicRemoval = true;   // Default (Proposed)
+        if (!settings) {
+            cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
+            if(fSettings.isOpened()) {
+                // Check if parameter exists
+                cv::FileNode node = fSettings["Occlusion.EnableFilter"];
+                if(!node.empty()) {
+                    int enableFilter = 1;
+                    node >> enableFilter;
+                    mbEnableOcclusionFilter = (enableFilter != 0);
+                }
+                
+                // Dynamic Removal (Geometry Check)
+                cv::FileNode nodeDyn = fSettings["Dynamic.EnableRemoval"];
+                if(!nodeDyn.empty()) {
+                    int enableRemoval = 1;
+                    nodeDyn >> enableRemoval;
+                    mbEnableDynamicRemoval = (enableRemoval != 0);
+                }
+            }
+        }
+        
+        if(mbEnableOcclusionFilter)
+            std::cout << "[Occlusion] Filter ENABLED" << std::endl;
+        else
+            std::cout << "[Occlusion] Filter DISABLED" << std::endl;
+            
+        if(mbEnableDynamicRemoval)
+            std::cout << "[Dynamic] Geometric Check ENABLED" << std::endl;
+        else
+            std::cout << "[Dynamic] Geometric Check DISABLED (Chair features kept)" << std::endl;
     }
 
 #ifdef REGISTER_TIMES
@@ -1469,7 +1504,6 @@ namespace ORB_SLAM3
         mpDetector->GetImage(InputImage);
         mpDetector->Detect();
         //mask to orbextractor
-        //mpORBextractorLeft->mvDynamicMask = mpDetector->mvDynamicMask;
         mpORBextractorLeft->mInstanceMap = mpDetector->mInstanceMap.clone(); 
         //std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
         {
@@ -1513,7 +1547,8 @@ namespace ORB_SLAM3
         Track();
 
         // 2. 在清除数据前，执行几何检测
-        if(mState == OK) { 
+        // Safety: ensure we have more than 1 keyframe (not just initialized) to avoid degenerate geometry
+        if(mState == OK && mbEnableDynamicRemoval && mpAtlas->GetAllKeyFrames().size() > 1) { 
             // 1. 建立统计桶：记录每个 Instance ID 关联了哪些特征点
             // Key: id, Value: 特征点索引 i 的列表
             std::map<uchar, std::vector<int>> instanceFeatureMapping;
@@ -1539,16 +1574,33 @@ namespace ORB_SLAM3
                 bool isDynamic = CheckInstanceDynamic(mCurrentFrame, id);
                 
                 if(isDynamic) {
+                    mMoveConfirmCnt[id]++;
+                } else {
+                    mMoveConfirmCnt[id] = 0;
+                }
+
+                if(mMoveConfirmCnt[id] >= 2) {
                     // 3. 连坐制度：只要判定该 ID 动了，直接剔除关联的所有特征点
                     for(int idx : featureIndices) {
                         mCurrentFrame.mvbOutlier[idx] = true;
+                        mCurrentFrame.mvbDynamic[idx] = true;
                         if(mCurrentFrame.mvpMapPoints[idx]) {
                             mCurrentFrame.mvpMapPoints[idx]->SetBadFlag();
                             mCurrentFrame.mvpMapPoints[idx] = static_cast<MapPoint*>(NULL);
                         }
                     }
                     cout << "[Dyna-Logic] Instance ID " << (int)id 
-                        << " (Chair) is DYNAMIC. Removed " << featureIndices.size() << " points." << endl;
+                        << " (Chair) is CONFIRMED DYNAMIC (Count " << mMoveConfirmCnt[id] << "). Removed " << featureIndices.size() << " points." << endl;
+                }
+            }
+
+            // Remove IDs that are no longer in the current frame to enforce "consecutive"
+            for(auto it = mMoveConfirmCnt.begin(); it != mMoveConfirmCnt.end(); ) {
+                // instanceFeatureMapping key is uchar, mMoveConfirmCnt key is int
+                if(instanceFeatureMapping.find((uchar)it->first) == instanceFeatureMapping.end()) {
+                    it = mMoveConfirmCnt.erase(it);
+                } else {
+                    ++it;
                 }
             }
         }
@@ -2193,7 +2245,15 @@ namespace ORB_SLAM3
                 // if(bNeedKF && bOK)
                 if (bNeedKF && (bOK || (mInsertKFsLost && mState == RECENTLY_LOST &&
                                         (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD))))
-                    CreateNewKeyFrame();
+                {
+                    // 检查是否被严重遮挡 (如果启用过滤器)
+                    if (mbEnableOcclusionFilter && IsFrameOccluded(mCurrentFrame)) {
+                        // std::cout << "[Tracking] Skip keyframe due to heavy occlusion" << std::endl;
+                        // 不创建关键帧，继续跟踪
+                    } else {
+                        CreateNewKeyFrame();
+                    }
+                }
 
 #ifdef REGISTER_TIMES
                 std::chrono::steady_clock::time_point time_EndNewKF = std::chrono::steady_clock::now();
@@ -3282,81 +3342,175 @@ namespace ORB_SLAM3
         mpLastKeyFrame = pKF;
     }
 
+    /**
+     * @brief 使用对极几何约束检测物体实例是否为动态物体
+     * 
+     * 核心思想：
+     * 对于静态物体，同一个3D点在两帧中的观测应该满足对极约束 x2^T * F * x1 = 0
+     * 如果物体在运动，则该约束会被破坏，对极距离会显著增大
+     * 
+     * @param CurrentFrame 当前帧
+     * @param InstanceID 要检测的物体实例ID（来自语义分割）
+     * @return true 物体是动态的
+     * @return false 物体是静态的或样本不足
+     */
     bool Tracking::CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID) {
-        // 1. 获取参考关键帧及共视邻居 (最多 5 个)
+        // ========== 步骤1: 获取参考关键帧 ==========
+        // 参考关键帧是当前帧跟踪的基准帧，用于建立对极几何关系
         KeyFrame* pRefKF = CurrentFrame.mpReferenceKF;
-        if(!pRefKF) return false;
-        vector<KeyFrame*> vpNeighKFs = pRefKF->GetBestCovisibilityKeyFrames(5);
-        vpNeighKFs.push_back(pRefKF); 
+        if(!pRefKF) return false; // 没有参考帧则无法判断
 
-        // 获取当前帧位姿和相机中心
-        Sophus::SE3f Tcw = CurrentFrame.GetPose();
-        Eigen::Vector3f Ow = Tcw.inverse().translation(); 
+        // ========== 步骤2: 计算基础矩阵 F21 (从参考帧到当前帧) ==========
+        // 对极几何的核心：x_curr^T * F * x_ref = 0
+        // 其中 F 是基础矩阵，描述两帧之间的几何关系
+        
+        // 2.1 计算相对位姿 Tcr (从参考帧坐标系到当前帧坐标系的变换)
+        // Tcr = Tcw * Twr = Tcw * Trw^{-1}
+        Sophus::SE3f Tcw = CurrentFrame.GetPose();  // 当前帧在世界坐标系下的位姿
+        Sophus::SE3f Trw = pRefKF->GetPose();       // 参考帧在世界坐标系下的位姿
+        Sophus::SE3f Tcr = Tcw * Trw.inverse();     // 相对位姿变换
+        
+        // 2.2 提取旋转矩阵 R 和平移向量 t
+        Eigen::Matrix3f Rcr = Tcr.rotationMatrix();  // 3x3 旋转矩阵
+        Eigen::Vector3f tcr = Tcr.translation();     // 3x1 平移向量
+        
+        // 2.3 构造反对称矩阵 [t]_x (用于叉乘运算)
+        // [t]_x 是平移向量 t 的反对称矩阵，满足 [t]_x * v = t × v
+        Eigen::Matrix3f tx = Sophus::SO3f::hat(tcr);
+        
+        // 2.4 计算本质矩阵 E = [t]_x * R
+        // 本质矩阵描述归一化图像平面上的对极约束
+        Eigen::Matrix3f E = tx * Rcr;
+        
+        // 2.5 计算基础矩阵 F = K_curr^{-T} * E * K_ref^{-1}
+        // 基础矩阵将对极约束从归一化平面映射到像素平面
+        // K^{-T} 表示 (K^{-1})^T，即内参矩阵逆的转置
+        Eigen::Matrix3f K_c = CurrentFrame.mK_;  // 当前帧内参矩阵
+        Eigen::Matrix3f K_r;                     // 参考帧内参矩阵
+        K_r << pRefKF->fx, 0, pRefKF->cx,
+               0, pRefKF->fy, pRefKF->cy,
+               0, 0, 1;
 
-        int dynamic_votes = 0;
-        int total_valid_samples = 0;
+        Eigen::Matrix3f F21 = K_c.inverse().transpose() * E * K_r.inverse();
+        
+        // 2.6 转换为 OpenCV 格式以便后续计算
+        cv::Mat F21_cv;
+        cv::eigen2cv(F21, F21_cv);
 
-        // 2. 在椅子 Mask 内随机采样像素点
-        for (int i = 0; i < mLastFrame.N; i++) {
-            int u = cvRound(mLastFrame.mvKeysUn[i].pt.x);
-            int v = cvRound(mLastFrame.mvKeysUn[i].pt.y);
+        // ========== 步骤3: 统计违反对极约束的特征点数量 ==========
+        int dynamic_votes = 0;   // 违反对极约束的点数（投票为"动态"）
+        int total_checks = 0;    // 总共检查的点数
+        
+        // 阈值设置：
+        // - epipolar_dist_th: 对极距离阈值（像素单位）
+        //   静态点到对极线的距离应该接近0，超过此阈值认为违反约束
+        const float th = 3.841; // 卡方分布阈值 (1自由度，95%置信度)
+        const float epipolar_dist_th = 3.5; // 像素距离阈值（调大使检测更敏感）
 
-            if(mLastFrame.mInstanceMap.at<uchar>(v,u) != InstanceID) continue;
-
-            float z_curr = mLastFrame.mvDepth[i];
-            if(z_curr <= 0) continue;
-
-            // 当前点反投影到世界坐标 Pw
-            Eigen::Vector3f Pc((u-mCurrentFrame.fx)*z_curr/mCurrentFrame.fy, (v-mCurrentFrame.fy)*z_curr/mCurrentFrame.fy, z_curr);
-            Eigen::Vector3f Pw = Tcw.inverse() * Pc;
-
-            int frame_dynamic_count = 0;
-            int frame_check_count = 0;
-
-            // 3. 遍历多个参考关键帧进行交叉验证
-            for(KeyFrame* pKF : vpNeighKFs) {
-                if(!pKF || pKF->isBad()) continue;
+        // ========== 步骤4: 遍历当前帧中属于该实例的特征点 ==========
+        bool bCheckWithMapPoints = true; // 使用已有的地图点进行检查
+        
+        if (bCheckWithMapPoints) {
+            for(int i=0; i<CurrentFrame.N; i++) {
                 
-                Eigen::Vector3f Ow_kf = pKF->GetCameraCenter();
+                // 4.1 检查特征点是否属于目标实例
+                // 注意：使用原始坐标 mvKeys（未去畸变）来查询语义掩码
+                // 因为 YOLO 输出的掩码对应原始输入图像
+                int u = cvRound(CurrentFrame.mvKeys[i].pt.x);
+                int v = cvRound(CurrentFrame.mvKeys[i].pt.y);
+                if (u<0 || v<0 || u>=CurrentFrame.mInstanceMap.cols || v>=CurrentFrame.mInstanceMap.rows) 
+                    continue; // 超出图像边界
                 
-                // --- 视差角筛选 ---
-                Eigen::Vector3f v_cf = Pw - Ow;
-                Eigen::Vector3f vec_kf_dir = Pw - Ow_kf;
-                float cos_theta = v_cf.dot(vec_kf_dir) / (v_cf.norm() * vec_kf_dir.norm());
-                if(cos_theta < 0.866) continue; // 视差角 > 30度，跳过防止遮挡干扰
-
-                // --- 重投影 ---
-                Eigen::Vector3f P_in_kf = pKF->GetPose() * Pw;
-                float z_proj = P_in_kf.z();
-                int u_kf = round(P_in_kf.x() * pKF->fx / z_proj + pKF->cx);
-                int v_proj_kf = cvRound(P_in_kf.y() * pKF->fy / z_proj + pKF->cy);
-
-                // if(u_kf >= 0 && u_kf < pKF->mImDepth.cols && v_proj_kf >= 0 && v_proj_kf < pKF->mImDepth.rows) {
-                //     float z_kf_obs = pKF->mvDepth[i].at<float>(v_proj_kf, u_kf);
-                //     if(z_kf_obs <= 0) continue;
-
-                //     // --- 深度方差校核 ---
-                //     float sigma = sqrt(GetDepthVariance(pKF->GetDepthMap(), u_kf, v_proj_kf));
-                //     float dz = std::abs(z_proj - z_kf_obs);
-
-                //     // 最终判定：偏差大于 10cm 且显著大于局部深度噪声
-                //     if(dz > 0.1 && dz > 3 * sigma) {
-                //         frame_dynamic_count++;
-                //     }
-                //     frame_check_count++;
-                // }
-            }
-
-            if(frame_check_count > 0) {
-                total_valid_samples++;
-                // 如果在过半数的参考帧中都被判定为动，则该点投一票“动态”
-                if(frame_dynamic_count > frame_check_count / 2) dynamic_votes++;
+                int id = CurrentFrame.mInstanceMap.at<uchar>(v,u);
+                if(id != InstanceID) continue; // 不属于目标实例，跳过
+                
+                // 4.2 检查该特征点是否关联了有效的地图点
+                MapPoint* pMP = CurrentFrame.mvpMapPoints[i];
+                if(!pMP || pMP->isBad()) continue; // 没有地图点或地图点已损坏
+                
+                // 4.3 检查该地图点在参考关键帧中是否有观测
+                // 只有在两帧中都能观测到的点才能用于对极约束检查
+                std::tuple<int,int> indexes = pMP->GetIndexInKeyFrame(pRefKF);
+                int idx_ref = std::get<0>(indexes); // 在参考帧中的特征点索引
+                if(idx_ref >= 0) {
+                    // 该地图点在参考帧中有观测，可以进行对极约束检查
+                    
+                    // ========== 关键修改：确保参考帧中的对应点也是语义静态的 ==========
+                    // 只有当参考帧中的点位于静态区域（ID=0）时，才能用于对极约束计算
+                    // 这样可以确保对极几何基于可靠的静态参考点
+                    
+                    // 获取参考帧中对应点的坐标
+                    int u_ref = cvRound(pRefKF->mvKeys[idx_ref].pt.x);
+                    int v_ref = cvRound(pRefKF->mvKeys[idx_ref].pt.y);
+                    
+                    // 检查参考帧是否有语义掩码（可能某些关键帧没有）
+                    if(!pRefKF->mInstanceMap.empty()) {
+                        // 边界检查
+                        if(u_ref >= 0 && v_ref >= 0 && 
+                           u_ref < pRefKF->mInstanceMap.cols && 
+                           v_ref < pRefKF->mInstanceMap.rows) {
+                            
+                            uchar id_ref = pRefKF->mInstanceMap.at<uchar>(v_ref, u_ref);
+                            
+                            // 只有当参考点是绝对静态（ID=0）时才使用
+                            // ID=0: 静态背景
+                            // ID=1-249: 半动态物体（如椅子）
+                            // ID=255: 绝对动态物体（如人）
+                            if(id_ref != 0) {
+                                continue; // 参考点不是静态的，跳过此点
+                            }
+                        } else {
+                            continue; // 参考点超出边界，跳过
+                        }
+                    }
+                    // 如果参考帧没有语义掩码，则保守处理：仍然使用该点
+                    
+                    // 4.4 获取特征点在两帧中的像素坐标（去畸变后的坐标）
+                    cv::Point2f pt_ref = pRefKF->mvKeysUn[idx_ref].pt;      // 参考帧中的坐标
+                    cv::Point2f pt_curr = CurrentFrame.mvKeysUn[i].pt;      // 当前帧中的坐标
+                    
+                    // 4.5 计算对极距离（点到对极线的距离）
+                    // 使用 Sampson Distance 近似算法：
+                    // 
+                    // 对极约束：x_curr^T * F * x_ref = 0
+                    // 对极线方程：l = F * x_ref = [a, b, c]^T
+                    // 点到直线距离：d = |a*x + b*y + c| / sqrt(a^2 + b^2)
+                    
+                    // 计算对极线 l = F21 * [x_ref, y_ref, 1]^T
+                    float a = F21_cv.at<float>(0,0) * pt_ref.x + F21_cv.at<float>(0,1) * pt_ref.y + F21_cv.at<float>(0,2);
+                    float b = F21_cv.at<float>(1,0) * pt_ref.x + F21_cv.at<float>(1,1) * pt_ref.y + F21_cv.at<float>(1,2);
+                    float c = F21_cv.at<float>(2,0) * pt_ref.x + F21_cv.at<float>(2,1) * pt_ref.y + F21_cv.at<float>(2,2);
+                    
+                    // 计算当前帧点到对极线的距离
+                    float num = a * pt_curr.x + b * pt_curr.y + c;  // 分子：点到直线的有向距离
+                    float den = a*a + b*b;                          // 分母：直线法向量的模长平方
+                    
+                    if(den == 0) continue; // 退化情况，跳过
+                    
+                    // Sampson Distance 的平方
+                    float dSq = num*num / den;
+                    
+                    // 4.6 判断是否违反对极约束
+                    // 如果距离超过阈值，说明该点不满足静态假设，投票为"动态"
+                    if(dSq > epipolar_dist_th * epipolar_dist_th) {
+                         dynamic_votes++;  // 违反约束，投票为动态
+                    }
+                    total_checks++;  // 统计总检查点数
+                }
             }
         }
 
-        // 4. 实例级投票结果
-        if(total_valid_samples == 0) return false;
-        return (float)dynamic_votes / total_valid_samples > 0.3; // 30% 以上点动，判定整把椅子在动
+        // ========== 步骤5: 根据统计结果判定物体是否动态 ==========
+        // 判定策略：
+        // 1. 样本数量检查：至少需要3个有效检查点，否则样本不足，保守认为静态
+        // 2. 比例阈值：如果超过30%的点违反对极约束，则判定为动态物体
+        //    - 降低到30%是为了提高检测灵敏度，更容易检测到动态物体
+        //    - 允许一定的误检容忍度（噪声、匹配误差等）
+        
+        if(total_checks < 3) return false; // 样本不足，保守起见认为静止
+        
+        // 计算违反约束的比例，超过30%则判定为动态
+        return (float)dynamic_votes / total_checks > 0.3;
     }
 
     // 辅助函数：计算 Patch 方差
@@ -4151,4 +4305,50 @@ namespace ORB_SLAM3
     }
 #endif
 
-} // namespace ORB_SLAM
+    // 检查当前帧是否被严重遮挡
+    bool Tracking::IsFrameOccluded(Frame &frame) {
+        // 如果没有实例映射，无法判断遮挡
+        if (frame.mInstanceMap.empty()) {
+            return false;
+        }
+        
+        int totalPixels = frame.mInstanceMap.rows * frame.mInstanceMap.cols;
+        if (totalPixels == 0) return false;
+        
+        int dynamicPixels = 0;
+        
+        // 统计动态区域（人体，ID=255或其他特定的动态ID）
+        // 这里我们假设ID=255是绝对动态物体（例如人）
+        // 为了提高效率，我们可以使用OpenCV的countNonZero或者特定的统计方法
+        // 但为了简单和兼容性，我们直接遍历或者采样
+        
+        // 使用采样统计以提高速度
+        int step = 5; // 每5个像素采样一次
+        int sampleCount = 0;
+        
+        for (int v = 0; v < frame.mInstanceMap.rows; v += step) {
+            for (int u = 0; u < frame.mInstanceMap.cols; u += step) {
+                sampleCount++;
+                uchar id = frame.mInstanceMap.at<uchar>(v, u);
+                if (id == 255) {  // 绝对动态物体（人）
+                    dynamicPixels++;
+                }
+            }
+        }
+        
+        if (sampleCount == 0) return false;
+        
+        // 如果动态区域超过30%，认为被严重遮挡
+        float occlusionRatio = (float)dynamicPixels / sampleCount;
+        
+        if (occlusionRatio > 0.3f) {
+            std::cout << "[Occlusion] Frame heavily occluded: " 
+                      << (occlusionRatio * 100) << "%" << std::endl;
+            return true;
+        }
+        
+        return false;
+    }
+
+} // namespace ORB_SLAM3
+

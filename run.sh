@@ -1,0 +1,1 @@
+./Examples/RGB-D/rgbd_tum Vocabulary/ORBvoc.txt Examples/RGB-D/TUM3.yaml /home/waitangwen/Datasets/rgbd_dataset_freiburg3_walking_xyz Examples/RGB-D/fr3_walking_xyz.txt

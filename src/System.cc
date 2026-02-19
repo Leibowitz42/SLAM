@@ -340,27 +340,27 @@ void System::Shutdown()
 
     mpLocalMapper->RequestFinish();
     mpLoopCloser->RequestFinish();
-    /*if(mpViewer)
+    if(mpViewer)
     {
         mpViewer->RequestFinish();
         while(!mpViewer->isFinished())
             usleep(5000);
-    }*/
+    }
 
     // Wait until all thread have effectively stopped
-    /*while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
+    while(!mpLocalMapper->isFinished() || !mpLoopCloser->isFinished() || mpLoopCloser->isRunningGBA())
     {
         if(!mpLocalMapper->isFinished())
-            cout << "mpLocalMapper is not finished" << endl;*/
-        /*if(!mpLoopCloser->isFinished())
-            cout << "mpLoopCloser is not finished" << endl;
+            // cout << "mpLocalMapper is not finished" << endl;
+        if(!mpLoopCloser->isFinished())
+            // cout << "mpLoopCloser is not finished" << endl;
         if(mpLoopCloser->isRunningGBA()){
             cout << "mpLoopCloser is running GBA" << endl;
             cout << "break anyway..." << endl;
             break;
-        }*/
-        /*usleep(5000);
-    }*/
+        }
+        usleep(5000);
+    }
 
     if(!mStrSaveAtlasToFile.empty())
     {
@@ -372,7 +372,23 @@ void System::Shutdown()
     mpTracker->PrintTimeStats();
 #endif
 
+    // 显式清理动态分配的对象，防止程序退出时的内存错误
+    // 注意顺序：先清理使用者（Tracking等），再清理被使用者（Detector等）
+    
+    // 1. 删除 Tracking (它可能持有 Detector 的指针)
+    // 但 System 中没有 delete mpTracker，为了安全起见，我们只能小心处理 Detector
+    
+    if(mpDetector)
+    {
+        // 先通知 Tracking 不再使用 Detector
+        if(mpTracker) mpTracker->SetDetector(nullptr);
+        
+        delete mpDetector;
+        mpDetector = nullptr;
+    }
 
+    // 虽然没有析构函数，既然这都在 Shutdown 里做了，我们可以尝试清理其他
+    // 但为了最小化改动风险，我们主要针对 Detector (因为这是我们添加的)
 }
 
 bool System::isShutDown() {

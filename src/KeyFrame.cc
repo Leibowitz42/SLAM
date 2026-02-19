@@ -93,6 +93,11 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     SetPose(F.GetPose());
 
     mnOriginMapId = pMap->GetId();
+    
+    // 复制语义分割掩码，用于对极几何约束检查
+    if(!F.mInstanceMap.empty()) {
+        mInstanceMap = F.mInstanceMap.clone();
+    }
 }
 
 void KeyFrame::ComputeBoW()

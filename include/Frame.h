@@ -247,6 +247,7 @@ public:
     // MapPoints associated to keypoints, NULL pointer if no association.
     // Flag to identify outlier associations.
     std::vector<bool> mvbOutlier;
+    std::vector<bool> mvbDynamic;
     int mnCloseMPs;
 
     // Keypoints are assigned to cells in a grid to reduce matching complexity when projecting MapPoints.

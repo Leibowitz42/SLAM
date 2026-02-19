@@ -4,6 +4,7 @@
 #include<time.h>
 #include<opencv2/opencv.hpp>
 #include <YoloDetect.h>
+#include <set>
 
 // using namespace dnn;
 Yolov8SegOnnx		model;
@@ -25,12 +26,28 @@ YoloDetection::YoloDetection()
     mvDynamicNames = {"person", "car", "motorbike", "bus", "train", "truck", "boat", "bird", "cat",
                       "dog", "horse", "sheep", "crow", "bear"};
     mvCandidateNames = {"chair", "book"};
+    
+    // 初始化实例跟踪器
+    mNextGlobalID = 1;  // 全局ID从1开始
 
 }
 
 YoloDetection::~YoloDetection()
 {
-
+    mvDynamicNames.clear();
+    mvCandidateNames.clear();
+    mvDynamicArea.clear();
+    mvPersonArea.clear();
+    mvDynamicMask.clear();
+    mvCandidateMask.clear();
+    mmDetectMap.clear();
+    
+    mTrackedInstances.clear();
+    mAvailableIDs.clear();
+    
+    mask.release();
+    objectMask.release();
+    mInstanceMap.release();
 }
 
 bool YoloDetection::Detect()
@@ -57,9 +74,28 @@ bool YoloDetection::Detect()
     std::vector<OutputParams> result;
     mInstanceMap = cv::Mat::zeros(image.size(), CV_8UC1);
     if (model.OnnxDetect(image, result)) {
+        
+        // ========== 步骤1: 收集半动态物体的bbox和类别，用于实例跟踪 ==========
+        std::vector<cv::Rect2f> candidateBboxes;
+        std::vector<std::string> candidateClassNames;
+        std::vector<int> candidateIndices;  // 记录在result中的索引
+        
+        for (int i = 0; i < result.size(); i++) {
+            if (count(mvCandidateNames.begin(), mvCandidateNames.end(), 
+                     model._className[result[i].id])) {
+                candidateBboxes.push_back(result[i].box);
+                candidateClassNames.push_back(model._className[result[i].id]);
+                candidateIndices.push_back(i);
+            }
+        }
+        
+        // ========== 步骤2: 更新实例跟踪器，获取稳定的全局ID ==========
+        std::vector<int> globalIDs = UpdateInstanceTracker(candidateBboxes, candidateClassNames);
+        
+        // ========== 步骤3: 生成mInstanceMap，使用稳定的全局ID ==========
         mask = cv::Mat::zeros(image.size(), CV_8UC3);
         mInstanceMap.setTo(0); // 彻底清空
-        int candidateID = 1; // 给半动态物体的起始 ID (1-250)
+        
         for (int i = 0; i < result.size(); i++) {
             int left, top;
             int color_num = i;
@@ -82,17 +118,32 @@ bool YoloDetection::Detect()
             }
             if (result[i].box.width <= 0 || result[i].box.height <= 0 || result[i].boxMask.empty())
                 continue;
-            // 检查当前物体的类别名称是否在“预设动态物体列表(mvDynamicNames)”中
+                
+            // 检查当前物体的类别名称是否在"预设动态物体列表(mvDynamicNames)"中
             if (count(mvDynamicNames.begin(), mvDynamicNames.end(), model._className[result[i].id])){
                 mInstanceMap(result[i].box).setTo(cv::Scalar(255), result[i].boxMask);
             }
             else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), model._className[result[i].id])){
-                // a. 生成黑白掩码：在 objectMask 的物体区域内，将属于物体的像素设为 id
-                //std::cout << "Assigning ID " << candidateID << " to " << model._className[result[i].id] << std::endl;
-                mInstanceMap(result[i].box).setTo(cv::Scalar(candidateID), result[i].boxMask);
-                // 增加 ID，确保下一把椅子有不同的编号
-                candidateID++; 
-                if(candidateID >= 250) candidateID = 249; // 防止溢出
+                // ✅ 使用稳定的全局ID，而不是临时的candidateID
+                // 找到该检测在candidateIndices中的位置
+                auto it = std::find(candidateIndices.begin(), candidateIndices.end(), i);
+                if (it != candidateIndices.end()) {
+                    int idx = std::distance(candidateIndices.begin(), it);
+                    
+                    // 边界检查
+                    if (idx >= 0 && idx < (int)globalIDs.size()) {
+                        int stableID = globalIDs[idx];
+                        
+                        if (stableID > 0 && stableID < 250) {
+                            mInstanceMap(result[i].box).setTo(cv::Scalar(stableID), result[i].boxMask);
+                            // std::cout << "[Detect] Assigned stable ID " << stableID 
+                            //           << " to " << model._className[result[i].id] << std::endl;
+                        }
+                    } else {
+                        std::cerr << "[Detect] ERROR: idx=" << idx << " out of range, globalIDs.size()=" 
+                                  << globalIDs.size() << std::endl;
+                    }
+                }
             }
             
             // 3. 统计映射（保持原样，供 Viewer 使用）
@@ -127,4 +178,138 @@ void YoloDetection::ClearImage()
 void YoloDetection::ClearArea()
 {
     mvPersonArea.clear();
+}
+
+// ========== 实例跟踪器实现 ==========
+
+// 分配新ID（优先使用回收的ID）
+int YoloDetection::AllocateInstanceID() {
+    // 1. 优先使用回收的ID
+    if (!mAvailableIDs.empty()) {
+        int id = *mAvailableIDs.begin();
+        mAvailableIDs.erase(mAvailableIDs.begin());
+        return id;
+    }
+    
+    // 2. 如果没有回收的ID，使用新ID
+    if (mNextGlobalID < MAX_INSTANCE_ID) {
+        return mNextGlobalID++;
+    }
+    
+    // 3. 如果ID用完了，从1开始循环使用
+    // 这种情况很少发生，因为会有ID回收
+    std::cout << "[Instance Tracker] WARNING: ID pool exhausted, recycling from 1" << std::endl;
+    mNextGlobalID = 1;
+    return mNextGlobalID++;
+}
+
+// 回收ID（当实例被删除时）
+void YoloDetection::RecycleInstanceID(int id) {
+    if (id > 0 && id < MAX_INSTANCE_ID) {
+        mAvailableIDs.insert(id);
+        // std::cout << "[Instance Tracker] Recycled ID: " << id << std::endl;
+    }
+}
+
+float YoloDetection::ComputeIoU(const cv::Rect2f& box1, const cv::Rect2f& box2) {
+    // 计算交集区域
+    float x1 = std::max(box1.x, box2.x);
+    float y1 = std::max(box1.y, box2.y);
+    float x2 = std::min(box1.x + box1.width, box2.x + box2.width);
+    float y2 = std::min(box1.y + box1.height, box2.y + box2.height);
+    
+    float intersection = std::max(0.0f, x2 - x1) * std::max(0.0f, y2 - y1);
+    
+    // 计算并集区域
+    float area1 = box1.width * box1.height;
+    float area2 = box2.width * box2.height;
+    float union_area = area1 + area2 - intersection;
+    
+    // 返回IoU
+    return intersection / (union_area + 1e-6f);
+}
+
+std::vector<int> YoloDetection::UpdateInstanceTracker(
+    const std::vector<cv::Rect2f>& bboxes, 
+    const std::vector<std::string>& classNames) {
+    
+    const float IOU_THRESHOLD = 0.3f;  // IoU阈值：大于此值认为是同一物体
+    const int MAX_FRAMES_LOST = 30;    // 最大丢失帧数：超过此值删除实例
+    
+    std::vector<int> detectionToGlobalID(bboxes.size(), -1);
+    std::vector<bool> trackedMatched(mTrackedInstances.size(), false);
+    std::vector<TrackedInstance> newInstances;  // 收集新实例
+    
+    // 1. 对每个新检测，找到最佳匹配的已跟踪实例
+    for (size_t i = 0; i < bboxes.size(); i++) {
+        const cv::Rect2f& newBox = bboxes[i];
+        const std::string& className = classNames[i];
+        
+        float bestIoU = IOU_THRESHOLD;
+        int bestMatchIdx = -1;
+        
+        // 在已跟踪实例中寻找最佳匹配
+        for (size_t j = 0; j < mTrackedInstances.size(); j++) {
+            if (trackedMatched[j]) continue;  // 已被匹配
+            if (mTrackedInstances[j].className != className) continue;  // 类别不同
+            
+            float iou = ComputeIoU(newBox, mTrackedInstances[j].bbox);
+            if (iou > bestIoU) {
+                bestIoU = iou;
+                bestMatchIdx = j;
+            }
+        }
+        
+        if (bestMatchIdx >= 0) {
+            // 找到匹配：更新已有实例
+            trackedMatched[bestMatchIdx] = true;
+            mTrackedInstances[bestMatchIdx].bbox = newBox;
+            mTrackedInstances[bestMatchIdx].framesSinceLastSeen = 0;
+            detectionToGlobalID[i] = mTrackedInstances[bestMatchIdx].globalID;
+        } else {
+            // 未找到匹配：先收集新实例，不立即添加
+            TrackedInstance newInstance;
+            newInstance.globalID = AllocateInstanceID();  // 使用ID分配函数
+            newInstance.bbox = newBox;
+            newInstance.className = className;
+            newInstance.framesSinceLastSeen = 0;
+            
+            newInstances.push_back(newInstance);
+            detectionToGlobalID[i] = newInstance.globalID;
+            
+            std::cout << "[Instance Tracker] New instance: ID=" << newInstance.globalID 
+                      << ", class=" << className << std::endl;
+        }
+    }
+    
+    // ✅ 循环结束后，统一添加新实例
+    for (const auto& newInst : newInstances) {
+        mTrackedInstances.push_back(newInst);
+    }
+    
+    // 2. 更新未匹配的实例，并移除长时间未见到的实例
+    auto it = mTrackedInstances.begin();
+    size_t idx = 0;
+    
+    while (it != mTrackedInstances.end()) {
+        if (idx < trackedMatched.size() && !trackedMatched[idx]) {
+            it->framesSinceLastSeen++;
+            
+            if (it->framesSinceLastSeen > MAX_FRAMES_LOST) {
+                std::cout << "[Instance Tracker] Lost: ID=" << it->globalID 
+                          << ", class=" << it->className << std::endl;
+                
+                // 回收ID
+                RecycleInstanceID(it->globalID);
+                
+                it = mTrackedInstances.erase(it);
+                // 注意：erase后不增加idx，因为后面的元素会前移
+                continue;
+            }
+        }
+        ++it;
+        ++idx;
+    }
+    
+    return detectionToGlobalID;
 }

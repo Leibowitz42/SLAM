@@ -59,7 +59,7 @@ Frame::Frame(const Frame &frame)
      mvKeysRight(frame.mvKeysRight), mvKeysUn(frame.mvKeysUn), mvuRight(frame.mvuRight),
      mvDepth(frame.mvDepth), mBowVec(frame.mBowVec), mFeatVec(frame.mFeatVec),
      mDescriptors(frame.mDescriptors.clone()), mDescriptorsRight(frame.mDescriptorsRight.clone()),
-     mvpMapPoints(frame.mvpMapPoints), mvbOutlier(frame.mvbOutlier), mImuCalib(frame.mImuCalib), mnCloseMPs(frame.mnCloseMPs),
+     mvpMapPoints(frame.mvpMapPoints), mvbOutlier(frame.mvbOutlier), mvbDynamic(frame.mvbDynamic), mImuCalib(frame.mImuCalib), mnCloseMPs(frame.mnCloseMPs),
      mpImuPreintegrated(frame.mpImuPreintegrated), mpImuPreintegratedFrame(frame.mpImuPreintegratedFrame), mImuBias(frame.mImuBias),
      mnId(frame.mnId), mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels),
      mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
@@ -149,6 +149,7 @@ Frame::Frame(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timeSt
 
     mvpMapPoints = vector<MapPoint*>(N,static_cast<MapPoint*>(NULL));
     mvbOutlier = vector<bool>(N,false);
+    mvbDynamic = vector<bool>(N,false);
     mmProjectPoints.clear();
     mmMatchedInImage.clear();
 
@@ -247,6 +248,7 @@ Frame::Frame(const cv::Mat &imGray, const cv::Mat &imDepth, const double &timeSt
     mmMatchedInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
+    mvbDynamic = vector<bool>(N,false);
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
@@ -338,6 +340,7 @@ Frame::Frame(const cv::Mat &imGray, const double &timeStamp, ORBextractor* extra
     mmMatchedInImage.clear();
 
     mvbOutlier = vector<bool>(N,false);
+    mvbDynamic = vector<bool>(N,false);
 
     // This is done only for the first Frame (or after a change in the calibration)
     if(mbInitialComputations)
