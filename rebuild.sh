@@ -19,8 +19,8 @@ if [ ! -f "build.ninja" ]; then
 fi
 
 # 内存 8GB，限制并行数为2
-echo ">>> 开始编译 (限制并行任务为3)..."
-ninja -j3
+echo ">>> 开始编译 (限制并行任务为2)..."
+ninja -j2
 
 echo ">>> 编译完成！"
 

@@ -1504,7 +1504,14 @@ namespace ORB_SLAM3
         mpDetector->GetImage(InputImage);
         mpDetector->Detect();
         //mask to orbextractor
-        mpORBextractorLeft->mInstanceMap = mpDetector->mInstanceMap.clone(); 
+        // Mask Refinement: Erode the mask to preserve static features at object boundaries
+        cv::Mat refinedMask = mpDetector->mInstanceMap.clone();
+        if (!refinedMask.empty()) {
+            // Using a 5x5 kernel for erosion; adjusts mask boundary inward
+            cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+            cv::erode(refinedMask, refinedMask, element);
+        }
+        mpORBextractorLeft->mInstanceMap = refinedMask;
         //std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
         {
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
@@ -1539,7 +1546,8 @@ namespace ORB_SLAM3
         mCurrentFrame.mNameFile = filename;
         mCurrentFrame.mnDataset = mnNumDataset;
         // 当你得到当前帧 mCurrentFrame 后
-        mCurrentFrame.mInstanceMap = mpDetector->mInstanceMap.clone(); 
+        // Use the refined mask for geometric checks too, to avoid processing noisy borders
+        mCurrentFrame.mInstanceMap = mpORBextractorLeft->mInstanceMap.clone(); 
 #ifdef REGISTER_TIMES
         vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
 #endif
@@ -1571,7 +1579,8 @@ namespace ORB_SLAM3
                 
                 // 调用 CheckInstanceDynamic。内部应该利用多视角几何对比投影位置
                 // 如果你还没写好 CheckInstanceDynamic，它应该利用当前帧的特征点深度 vs 投影深度
-                bool isDynamic = CheckInstanceDynamic(mCurrentFrame, id);
+                std::vector<int> dynamicIndices;
+                bool isDynamic = CheckInstanceDynamic(mCurrentFrame, id, dynamicIndices);
                 
                 if(isDynamic) {
                     mMoveConfirmCnt[id]++;
@@ -1580,17 +1589,27 @@ namespace ORB_SLAM3
                 }
 
                 if(mMoveConfirmCnt[id] >= 2) {
-                    // 3. 连坐制度：只要判定该 ID 动了，直接剔除关联的所有特征点
-                    for(int idx : featureIndices) {
+                    // 3. 改进策略：精准剔除 (Soft Removal)
+                    // 不再剔除该物体上的所有点 (featureIndices)，只剔除那些明显违反几何约束的 Outlier 点 (dynamicIndices)。
+                    // 这样即使椅子被误判为动，或者微动，我们也保留了大部分符合约束的静态特征点，防止 ATE 激增。
+                    
+                    int removedCount = 0;
+                    for(int idx : dynamicIndices) {
+                        if(mCurrentFrame.mvbOutlier[idx]) continue;
+
                         mCurrentFrame.mvbOutlier[idx] = true;
                         mCurrentFrame.mvbDynamic[idx] = true;
                         if(mCurrentFrame.mvpMapPoints[idx]) {
                             mCurrentFrame.mvpMapPoints[idx]->SetBadFlag();
                             mCurrentFrame.mvpMapPoints[idx] = static_cast<MapPoint*>(NULL);
                         }
+                        removedCount++;
                     }
-                    cout << "[Dyna-Logic] Instance ID " << (int)id 
-                        << " (Chair) is CONFIRMED DYNAMIC (Count " << mMoveConfirmCnt[id] << "). Removed " << featureIndices.size() << " points." << endl;
+                    if(removedCount > 0) {
+                        cout << "[Dyna-Logic] Instance ID " << (int)id 
+                             << " (Chair) CONFIRMED DYNAMIC. Removed " << removedCount << " outliers (kept " 
+                             << featureIndices.size() - removedCount << " inliers)." << endl;
+                    }
                 }
             }
 
@@ -3354,7 +3373,7 @@ namespace ORB_SLAM3
      * @return true 物体是动态的
      * @return false 物体是静态的或样本不足
      */
-    bool Tracking::CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID) {
+    bool Tracking::CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID, std::vector<int>& outDynamicIndices) {
         // ========== 步骤1: 获取参考关键帧 ==========
         // 参考关键帧是当前帧跟踪的基准帧，用于建立对极几何关系
         KeyFrame* pRefKF = CurrentFrame.mpReferenceKF;
@@ -3494,6 +3513,7 @@ namespace ORB_SLAM3
                     // 如果距离超过阈值，说明该点不满足静态假设，投票为"动态"
                     if(dSq > epipolar_dist_th * epipolar_dist_th) {
                          dynamic_votes++;  // 违反约束，投票为动态
+                         outDynamicIndices.push_back(i); // Record specific outlier index
                     }
                     total_checks++;  // 统计总检查点数
                 }
