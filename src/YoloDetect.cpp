@@ -7,15 +7,16 @@
 #include <set>
 
 // using namespace dnn;
-Yolov8SegOnnx		model;
+// using namespace dnn;
 YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
     std::string model_path_seg = "models/yolo11s-seg.onnx";
 
+    mpModel = new Yolov8SegOnnx();
 	// loading model
-    if (model.ReadModel(model_path_seg, true)) {
+    if (mpModel->ReadModel(model_path_seg, true)) {
 		std:: cout << "read net ok!" << endl;
 	}
     else {
@@ -48,6 +49,11 @@ YoloDetection::~YoloDetection()
     mask.release();
     objectMask.release();
     mInstanceMap.release();
+    
+    if(mpModel) {
+        delete mpModel;
+        mpModel = nullptr;
+    }
 }
 
 bool YoloDetection::Detect()
@@ -73,7 +79,7 @@ bool YoloDetection::Detect()
     }
     std::vector<OutputParams> result;
     mInstanceMap = cv::Mat::zeros(image.size(), CV_8UC1);
-    if (model.OnnxDetect(image, result)) {
+    if (mpModel->OnnxDetect(image, result)) {
         
         // ========== 步骤1: 收集半动态物体的bbox和类别，用于实例跟踪 ==========
         std::vector<cv::Rect2f> candidateBboxes;
@@ -82,9 +88,9 @@ bool YoloDetection::Detect()
         
         for (int i = 0; i < result.size(); i++) {
             if (count(mvCandidateNames.begin(), mvCandidateNames.end(), 
-                     model._className[result[i].id])) {
+                     mpModel->_className[result[i].id])) {
                 candidateBboxes.push_back(result[i].box);
-                candidateClassNames.push_back(model._className[result[i].id]);
+                candidateClassNames.push_back(mpModel->_className[result[i].id]);
                 candidateIndices.push_back(i);
             }
         }
@@ -120,10 +126,10 @@ bool YoloDetection::Detect()
                 continue;
                 
             // 检查当前物体的类别名称是否在"预设动态物体列表(mvDynamicNames)"中
-            if (count(mvDynamicNames.begin(), mvDynamicNames.end(), model._className[result[i].id])){
+            if (count(mvDynamicNames.begin(), mvDynamicNames.end(), mpModel->_className[result[i].id])){
                 mInstanceMap(result[i].box).setTo(cv::Scalar(255), result[i].boxMask);
             }
-            else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), model._className[result[i].id])){
+            else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), mpModel->_className[result[i].id])){
                 // ✅ 使用稳定的全局ID，而不是临时的candidateID
                 // 找到该检测在candidateIndices中的位置
                 auto it = std::find(candidateIndices.begin(), candidateIndices.end(), i);
@@ -137,7 +143,7 @@ bool YoloDetection::Detect()
                         if (stableID > 0 && stableID < 250) {
                             mInstanceMap(result[i].box).setTo(cv::Scalar(stableID), result[i].boxMask);
                             // std::cout << "[Detect] Assigned stable ID " << stableID 
-                            //           << " to " << model._className[result[i].id] << std::endl;
+                            //           << " to " << mpModel->_className[result[i].id] << std::endl;
                         }
                     } else {
                         std::cerr << "[Detect] ERROR: idx=" << idx << " out of range, globalIDs.size()=" 
@@ -148,7 +154,7 @@ bool YoloDetection::Detect()
             
             // 3. 统计映射（保持原样，供 Viewer 使用）
             cv:: Rect2i DetectArea(left, top, (result[i].box.width), (result[i].box.height));
-            mmDetectMap[model._className[result[i].id]].push_back(DetectArea);
+            mmDetectMap[mpModel->_className[result[i].id]].push_back(DetectArea);
            
         }
         if (mvDynamicArea.size() == 0)

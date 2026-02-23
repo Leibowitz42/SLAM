@@ -59,7 +59,7 @@ int main(int argc, char **argv)
     }
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::RGBD,true);
+    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::RGBD,false);
     float imageScale = SLAM.GetImageScale();
 
     // Vector for tracking time statistics
@@ -137,6 +137,8 @@ int main(int argc, char **argv)
     cout << "-------" << endl << endl;
     cout << "median tracking time: " << vTimesTrack[nImages/2] << endl;
     cout << "mean tracking time: " << totaltime/nImages << endl;
+    cout << "median fps: " << 1.0 / vTimesTrack[nImages/2] << endl;
+    cout << "mean fps: " << nImages / totaltime << endl;
 
     std:: string folderPath = string(argv[3]);
     std:: string trajectoryPath = folderPath + "/Results" + "/CameraTrajectory.txt";

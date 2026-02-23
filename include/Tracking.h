@@ -186,6 +186,7 @@ public:
     bool IsFrameOccluded(Frame &frame);
     bool mbEnableOcclusionFilter; // Flag to enable/disable occlusion filter (loaded from settings)
     bool mbEnableDynamicRemoval; // Flag to enable/disable dynamic object removal
+    bool CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID, std::vector<int>& outDynamicIndices);
 
 
 
