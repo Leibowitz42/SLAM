@@ -181,9 +181,19 @@ void GetMask2(const Mat& maskProposals, const Mat& maskProtos, OutputParams& out
 	resize(dest, mask, Size(width, height), INTER_NEAREST);
 	Rect mask_rect = temp_rect - Point(left, top);
 	mask_rect &= Rect(0, 0, width, height);
-	mask = mask(mask_rect) > mask_threshold;
-	if (mask.rows != temp_rect.height || mask.cols != temp_rect.width) { //https://github.com/UNeedCryDear/yolov8-opencv-onnxruntime-cpp/pull/30
-		resize(mask, mask, temp_rect.size(), INTER_NEAREST);
+	
+	if (mask_rect.area() > 0) {
+		mask = mask(mask_rect) > mask_threshold;
+	} else {
+		mask = Mat::zeros(temp_rect.size(), CV_8UC1);
+	}
+
+	if (mask.rows != temp_rect.height || mask.cols != temp_rect.width) { 
+		if (mask.empty()) {
+			mask = Mat::zeros(temp_rect.size(), CV_8UC1);
+		} else {
+			resize(mask, mask, temp_rect.size(), INTER_NEAREST);
+		}
 	}
 	output.boxMask = mask;
 

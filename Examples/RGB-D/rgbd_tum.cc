@@ -137,6 +137,9 @@ int main(int argc, char **argv)
     cout << "-------" << endl << endl;
     cout << "median tracking time: " << vTimesTrack[nImages/2] << endl;
     cout << "mean tracking time: " << totaltime/nImages << endl;
+    cout << "median fps: " << 1.0 / vTimesTrack[nImages/2] << endl;
+    cout << "mean fps: " << nImages / totaltime << endl;
+
 
     std:: string folderPath = string(argv[3]);
     std:: string trajectoryPath = folderPath + "/Results" + "/CameraTrajectory.txt";

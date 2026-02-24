@@ -230,6 +230,7 @@ bool Yolov8SegOnnx::OnnxBatchDetect(std::vector<cv::Mat>& srcImgs, std::vector<s
 		_outputNodeNames.size()
 	);
 
+
 	//post-process
 	float* all_data = output_tensors[0].GetTensorMutableData<float>();
 	_outputTensorShape = output_tensors[0].GetTensorTypeAndShapeInfo().GetShape();
@@ -237,25 +238,40 @@ bool Yolov8SegOnnx::OnnxBatchDetect(std::vector<cv::Mat>& srcImgs, std::vector<s
 	vector<int> mask_protos_shape = { 1,(int)_outputMaskTensorShape[1],(int)_outputMaskTensorShape[2],(int)_outputMaskTensorShape[3] };
 	int mask_protos_length = VectorProduct(mask_protos_shape);
 	int64_t one_output_length = VectorProduct(_outputTensorShape) / _outputTensorShape[0];
-	int net_width = (int)_outputTensorShape[1];
+	bool is_nms_embedded = (_outputTensorShape.size() == 3 && _outputTensorShape[2] == (int64_t)(4 + 1 + 1 + _outputMaskTensorShape[1])); // 4 coords + 1 conf + 1 cls + 32 mask = 38
+	int net_width = is_nms_embedded ? (int)_outputTensorShape[2] : (int)_outputTensorShape[1];
 	int socre_array_length = net_width - 4 - _outputMaskTensorShape[1];
 	for (int img_index = 0; img_index < srcImgs.size(); ++img_index) {
-		Mat output0 = Mat(Size((int)_outputTensorShape[2], (int)_outputTensorShape[1]), CV_32F, all_data).t();  //[bs,116,8400]=>[bs,8400,116]
+		Mat output0;
+		if (is_nms_embedded) {
+			output0 = Mat(Size((int)_outputTensorShape[2], (int)_outputTensorShape[1]), CV_32F, all_data).clone();
+		} else {
+			output0 = Mat(Size((int)_outputTensorShape[2], (int)_outputTensorShape[1]), CV_32F, all_data).t();  //[bs,116,8400]=>[bs,8400,116]
+		}
 		all_data += one_output_length;
 		float* pdata = (float*)output0.data;
 		int rows = output0.rows;
-		std::vector<int> class_ids;//���id����
-		std::vector<float> confidences;//���ÿ��id��Ӧ���Ŷ�����
-		std::vector<cv::Rect> boxes;//ÿ��id���ο�
-		std::vector<vector<float>> picked_proposals;  //output0[:,:, 5 + _className.size():net_width]===> for mask
+		std::vector<int> class_ids;
+		std::vector<float> confidences;
+		std::vector<cv::Rect> boxes;
+		std::vector<vector<float>> picked_proposals;
 		for (int r = 0; r < rows; ++r) {    //stride
-			cv::Mat scores(1, socre_array_length, CV_32F, pdata + 4);
 			Point classIdPoint;
 			double max_class_socre;
-			minMaxLoc(scores, 0, &max_class_socre, 0, &classIdPoint);
-			max_class_socre = (float)max_class_socre;
+			vector<float> temp_proto;
+
+			if (is_nms_embedded) {
+				max_class_socre = pdata[4];
+				classIdPoint.x = (int)pdata[5];
+				temp_proto = vector<float>(pdata + 6, pdata + net_width);
+			} else {
+				cv::Mat scores(1, socre_array_length, CV_32F, pdata + 4);
+				minMaxLoc(scores, 0, &max_class_socre, 0, &classIdPoint);
+				max_class_socre = (float)max_class_socre;
+				temp_proto = vector<float>(pdata + 4 + socre_array_length, pdata + net_width);
+			}
+
 			if (max_class_socre >= _classThreshold) {
-				vector<float> temp_proto(pdata + 4 + socre_array_length, pdata + net_width);
 				picked_proposals.push_back(temp_proto);
 				//rect [x,y,w,h]
 				float x = (pdata[0] - params[img_index][2]) / params[img_index][0];  //x
@@ -268,7 +284,7 @@ bool Yolov8SegOnnx::OnnxBatchDetect(std::vector<cv::Mat>& srcImgs, std::vector<s
 				confidences.push_back(max_class_socre);
 				boxes.push_back(Rect(left, top, int(w + 0.5), int(h + 0.5)));
 			}
-			pdata += net_width;//��һ��
+			pdata += net_width;
 		}
 
 		vector<int> nms_result;
