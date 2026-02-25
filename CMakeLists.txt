@@ -182,6 +182,10 @@ add_executable(rgbd_tum
         Examples/RGB-D/rgbd_tum.cc)
 target_link_libraries(rgbd_tum ${PROJECT_NAME})
 
+add_executable(trt_builder
+        trt_builder.cpp)
+target_link_libraries(trt_builder ${PROJECT_NAME})
+
 # If RealSense SDK is found, add the rgbd_realsense_D435i example
 if(realsense2_FOUND)
     add_executable(rgbd_realsense_D435i

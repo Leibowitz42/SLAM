@@ -13,11 +13,28 @@ bool Yolov8SegOnnx::ReadModel(const std::string& modelPath, bool isCuda, int cud
 			return false;
 		std::vector<std::string> available_providers = GetAvailableProviders();
 		auto cuda_available = std::find(available_providers.begin(), available_providers.end(), "CUDAExecutionProvider");
+		auto trt_available = std::find(available_providers.begin(), available_providers.end(), "TensorrtExecutionProvider");
 
-		if (isCuda && (cuda_available == available_providers.end()))
+		if (isCuda && (trt_available != available_providers.end()))
 		{
-			std::cout << "Your ORT build without GPU. Change to CPU." << std::endl;
-			std::cout << "************* Infer model on CPU! *************" << std::endl;
+			std::cout << "************* Infer model on TensorRT GPU! *************" << std::endl;
+			OrtTensorRTProviderOptions trt_options{};
+			trt_options.device_id = cudaID;
+			trt_options.trt_max_workspace_size = 2147483648; // 2GB
+			trt_options.trt_max_partition_iterations = 10;
+			trt_options.trt_min_subgraph_size = 5;
+			trt_options.trt_fp16_enable = 1;
+			trt_options.trt_engine_cache_enable = 1;
+			trt_options.trt_engine_cache_path = "./trt_cache";
+			_OrtSessionOptions.AppendExecutionProvider_TensorRT(trt_options);
+
+#if ORT_API_VERSION < ORT_OLD_VISON
+			OrtCUDAProviderOptions cudaOption;
+			cudaOption.device_id = cudaID;
+			_OrtSessionOptions.AppendExecutionProvider_CUDA(cudaOption);
+#else
+			OrtStatus* status = OrtSessionOptionsAppendExecutionProvider_CUDA(_OrtSessionOptions, cudaID);
+#endif
 		}
 		else if (isCuda && (cuda_available != available_providers.end()))
 		{
@@ -29,6 +46,11 @@ bool Yolov8SegOnnx::ReadModel(const std::string& modelPath, bool isCuda, int cud
 #else
 			OrtStatus* status = OrtSessionOptionsAppendExecutionProvider_CUDA(_OrtSessionOptions, cudaID);
 #endif
+		}
+		else if (isCuda && (cuda_available == available_providers.end()))
+		{
+			std::cout << "Your ORT build without GPU. Change to CPU." << std::endl;
+			std::cout << "************* Infer model on CPU! *************" << std::endl;
 		}
 		else
 		{
