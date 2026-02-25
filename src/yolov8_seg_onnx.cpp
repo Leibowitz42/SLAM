@@ -273,16 +273,31 @@ bool Yolov8SegOnnx::OnnxBatchDetect(std::vector<cv::Mat>& srcImgs, std::vector<s
 
 			if (max_class_socre >= _classThreshold) {
 				picked_proposals.push_back(temp_proto);
-				//rect [x,y,w,h]
-				float x = (pdata[0] - params[img_index][2]) / params[img_index][0];  //x
-				float y = (pdata[1] - params[img_index][3]) / params[img_index][1];  //y
-				float w = pdata[2] / params[img_index][0];  //w
-				float h = pdata[3] / params[img_index][1];  //h
-				int left = MAX(int(x - 0.5 * w + 0.5), 0);
-				int top = MAX(int(y - 0.5 * h + 0.5), 0);
+				int left, top, width, height;
+
+				if (is_nms_embedded) {
+					// pdata has [x1, y1, x2, y2]
+					left = MAX(int((pdata[0] - params[img_index][2]) / params[img_index][0] + 0.5), 0);
+					top = MAX(int((pdata[1] - params[img_index][3]) / params[img_index][1] + 0.5), 0);
+					int right = MAX(int((pdata[2] - params[img_index][2]) / params[img_index][0] + 0.5), 0);
+					int bottom = MAX(int((pdata[3] - params[img_index][3]) / params[img_index][1] + 0.5), 0);
+					width = right - left;
+					height = bottom - top;
+				} else {
+					// pdata has [cx, cy, w, h]
+					float x = (pdata[0] - params[img_index][2]) / params[img_index][0];  //x
+					float y = (pdata[1] - params[img_index][3]) / params[img_index][1];  //y
+					float w = pdata[2] / params[img_index][0];  //w
+					float h = pdata[3] / params[img_index][1];  //h
+					left = MAX(int(x - 0.5 * w + 0.5), 0);
+					top = MAX(int(y - 0.5 * h + 0.5), 0);
+					width = int(w + 0.5);
+					height = int(h + 0.5);
+				}
+				
 				class_ids.push_back(classIdPoint.x);
 				confidences.push_back(max_class_socre);
-				boxes.push_back(Rect(left, top, int(w + 0.5), int(h + 0.5)));
+				boxes.push_back(Rect(left, top, width, height));
 			}
 			pdata += net_width;
 		}
