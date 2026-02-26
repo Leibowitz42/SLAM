@@ -1,3 +1,8 @@
+find_program(CCACHE_FOUND ccache)
+if(CCACHE_FOUND)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+endif()
+
 cmake_minimum_required(VERSION 3.10)
 project(ORB_SLAM3)
 
@@ -42,11 +47,38 @@ add_definitions(-w)
 # Set the module path
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 
-set(ONNXRUNTIME_INCLUDE_DIR /home/waitangwen/libs/onnxruntime/include)
-set(ONNXRUNTIME_LIB_DIR /home/waitangwen/libs/onnxruntime/lib)
+option(ONNXRUNTIME_ROOT "Path to ONNX Runtime root (contains include/ and lib/)" "")
+
+if(ONNXRUNTIME_ROOT)
+    set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
+    set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
+else()
+    find_path(ONNXRUNTIME_INCLUDE_DIR
+              NAMES onnxruntime_cxx_api.h
+              PATHS /usr/include /usr/local/include /opt/onnxruntime/include
+              NO_DEFAULT_PATH)
+
+    find_library(ONNXRUNTIME_LIB
+                 NAMES onnxruntime libonnxruntime.so
+                 PATHS /usr/lib /usr/local/lib /opt/onnxruntime/lib
+                 NO_DEFAULT_PATH)
+
+    if(ONNXRUNTIME_LIB)
+        get_filename_component(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_LIB} DIRECTORY)
+    endif()
+endif()
+
+if(NOT EXISTS "${ONNXRUNTIME_INCLUDE_DIR}/onnxruntime_cxx_api.h")
+    message(FATAL_ERROR "onnxruntime_cxx_api.h not found. Set -DONNXRUNTIME_ROOT=/path/to/onnxruntime or install ONNX Runtime dev package and re-run CMake. Searched paths include: ${ONNXRUNTIME_INCLUDE_DIR}")
+endif()
 
 include_directories(${ONNXRUNTIME_INCLUDE_DIR})
-link_directories(${ONNXRUNTIME_LIB_DIR})
+if(ONNXRUNTIME_LIB_DIR)
+    link_directories(${ONNXRUNTIME_LIB_DIR})
+endif()
+
+# Option to enable CUDA execution provider linkage
+option(ONNXRUNTIME_USE_CUDA "Enable linking against ONNX Runtime CUDA provider" OFF)
 
 # Find OpenCV
 find_package(OpenCV 4.2)
@@ -143,6 +175,10 @@ add_library(${PROJECT_NAME} SHARED
         include/yolov8_seg_onnx.h
         include/yolov8_utils.h
         )
+
+        if(NOT ONNXRUNTIME_USE_CUDA)
+            target_compile_definitions(${PROJECT_NAME} PRIVATE DISABLE_ORT_CUDA)
+        endif()
 
 # Add the g2o library
 add_subdirectory(Thirdparty/g2o)

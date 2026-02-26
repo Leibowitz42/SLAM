@@ -72,5 +72,5 @@ Viewer.ViewpointF: 500.0
 #--------------------------------------------------------------------------------------------
 # Occlusion Parameters
 #--------------------------------------------------------------------------------------------
-Occlusion.EnableFilter: 1
-Dynamic.EnableRemoval: 1
+Occlusion.EnableFilter: 0
+Dynamic.EnableRemoval: 0

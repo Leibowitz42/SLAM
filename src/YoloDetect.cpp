@@ -12,7 +12,7 @@ YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
-    std::string model_path_seg = "models/yolo11s-seg.onnx";
+    std::string model_path_seg = "models/yolo26n-seg.onnx";
 
     mpModel = new Yolov8SegOnnx();
 	// loading model
@@ -24,8 +24,7 @@ YoloDetection::YoloDetection()
 		// return -1;
 	}
 
-    mvDynamicNames = {"person", "car", "motorbike", "bus", "train", "truck", "boat", "bird", "cat",
-                      "dog", "horse", "sheep", "crow", "bear"};
+    mvDynamicNames = {"person"};
     mvCandidateNames = {"chair", "book"};
     
     // 初始化实例跟踪器
@@ -103,6 +102,13 @@ bool YoloDetection::Detect()
         mInstanceMap.setTo(0); // 彻底清空
         
         for (int i = 0; i < result.size(); i++) {
+            std::string className = mpModel->_className[result[i].id];
+            // Only process if the class is in our dynamic or candidate list
+            if (count(mvDynamicNames.begin(), mvDynamicNames.end(), className) == 0 &&
+                count(mvCandidateNames.begin(), mvCandidateNames.end(), className) == 0) {
+                continue;
+            }
+
             int left, top;
             int color_num = i;
             if (result[i].box.area() > 0) {
@@ -126,10 +132,10 @@ bool YoloDetection::Detect()
                 continue;
                 
             // 检查当前物体的类别名称是否在"预设动态物体列表(mvDynamicNames)"中
-            if (count(mvDynamicNames.begin(), mvDynamicNames.end(), mpModel->_className[result[i].id])){
+            if (count(mvDynamicNames.begin(), mvDynamicNames.end(), className)){
                 mInstanceMap(result[i].box).setTo(cv::Scalar(255), result[i].boxMask);
             }
-            else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), mpModel->_className[result[i].id])){
+            else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), className)){
                 // ✅ 使用稳定的全局ID，而不是临时的candidateID
                 // 找到该检测在candidateIndices中的位置
                 auto it = std::find(candidateIndices.begin(), candidateIndices.end(), i);
@@ -142,8 +148,6 @@ bool YoloDetection::Detect()
                         
                         if (stableID > 0 && stableID < 250) {
                             mInstanceMap(result[i].box).setTo(cv::Scalar(stableID), result[i].boxMask);
-                            // std::cout << "[Detect] Assigned stable ID " << stableID 
-                            //           << " to " << mpModel->_className[result[i].id] << std::endl;
                         }
                     } else {
                         std::cerr << "[Detect] ERROR: idx=" << idx << " out of range, globalIDs.size()=" 
@@ -288,7 +292,7 @@ std::vector<int> YoloDetection::UpdateInstanceTracker(
         }
     }
     
-    // ✅ 循环结束后，统一添加新实例
+    // 循环结束后，统一添加新实例
     for (const auto& newInst : newInstances) {
         mTrackedInstances.push_back(newInst);
     }

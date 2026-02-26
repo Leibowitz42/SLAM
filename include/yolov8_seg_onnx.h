@@ -55,7 +55,7 @@ private:
 
 	int _batchSize = 1;  //if multi-batch,set this
 	bool _isDynamicShape = false;//onnx support dynamic shape
-	float _classThreshold = 0.25;
+	float _classThreshold = 0.5;
 	float _nmsThreshold = 0.45;
 	float _maskThreshold = 0.5;
 
