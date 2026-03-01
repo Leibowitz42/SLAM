@@ -12,7 +12,7 @@
 #include <utility>
 #include <time.h>
 using namespace std;
-class Yolov8SegOnnx; // Forward declaration
+#include "yolov8_seg_base.h"
 
 class YoloDetection
 {
@@ -42,8 +42,8 @@ public:
     cv::Mat mask;
     cv::Mat objectMask;
     cv::Mat mInstanceMap;
-    // Model pointer to manage lifecycle correctly
-    Yolov8SegOnnx* mpModel;
+    // Model pointer: TensorRT (.engine) or ONNX Runtime (.onnx)
+    IYolov8Seg* mpModel = nullptr;
 
 private:
     // ========== 实例跟踪器 ==========

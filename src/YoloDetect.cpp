@@ -1,28 +1,32 @@
 #include <iostream>
 #include "yolov8_seg_onnx.h"
+#include "yolov8_seg_trt.h"
 #include <opencv2/core.hpp> // For cv::Scalar
 #include<time.h>
 #include<opencv2/opencv.hpp>
 #include <YoloDetect.h>
 #include <set>
 
-// using namespace dnn;
-// using namespace dnn;
+static bool endsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
     std::string model_path_seg = "models/yolo26n-seg.onnx";
 
-    mpModel = new Yolov8SegOnnx();
-	// loading model
+    if (endsWith(model_path_seg, ".engine"))
+        mpModel = new Yolov8SegTrt();
+    else
+        mpModel = new Yolov8SegOnnx();
+
     if (mpModel->ReadModel(model_path_seg, true)) {
-		std:: cout << "read net ok!" << endl;
-	}
-    else {
-        std:: cout << "read net failed!" << endl;
-		// return -1;
-	}
+        std::cout << "read net ok!" << std::endl;
+    } else {
+        std::cout << "read net failed!" << std::endl;
+    }
 
     mvDynamicNames = {"person"};
     mvCandidateNames = {"chair", "book"};
@@ -49,7 +53,7 @@ YoloDetection::~YoloDetection()
     objectMask.release();
     mInstanceMap.release();
     
-    if(mpModel) {
+    if (mpModel) {
         delete mpModel;
         mpModel = nullptr;
     }
@@ -85,11 +89,14 @@ bool YoloDetection::Detect()
         std::vector<std::string> candidateClassNames;
         std::vector<int> candidateIndices;  // 记录在result中的索引
         
+        const int numClasses = static_cast<int>(mpModel->_className.size());
         for (int i = 0; i < result.size(); i++) {
+            int cid = result[i].id;
+            if (cid < 0 || cid >= numClasses) continue;
             if (count(mvCandidateNames.begin(), mvCandidateNames.end(), 
-                     mpModel->_className[result[i].id])) {
+                     mpModel->_className[cid])) {
                 candidateBboxes.push_back(result[i].box);
-                candidateClassNames.push_back(mpModel->_className[result[i].id]);
+                candidateClassNames.push_back(mpModel->_className[cid]);
                 candidateIndices.push_back(i);
             }
         }
@@ -101,65 +108,66 @@ bool YoloDetection::Detect()
         mask = cv::Mat::zeros(image.size(), CV_8UC3);
         mInstanceMap.setTo(0); // 彻底清空
         
+        const int numColors = static_cast<int>(color.size());
         for (int i = 0; i < result.size(); i++) {
-            std::string className = mpModel->_className[result[i].id];
+            int cid = result[i].id;
+            if (cid < 0 || cid >= numClasses) continue;
+            if (cid >= numColors) continue;
+
+            std::string className = mpModel->_className[cid];
             // Only process if the class is in our dynamic or candidate list
             if (count(mvDynamicNames.begin(), mvDynamicNames.end(), className) == 0 &&
                 count(mvCandidateNames.begin(), mvCandidateNames.end(), className) == 0) {
                 continue;
             }
 
-            int left, top;
-            int color_num = i;
+            int left = 0, top = 0;
             if (result[i].box.area() > 0) {
-                rectangle(img, result[i].box, color[result[i].id], 2, 8);
+                rectangle(img, result[i].box, color[cid], 2, 8);
                 left = result[i].box.x;
                 top = result[i].box.y;
             }
 
             // 1. 可视化部分（保持原样，用于画出带颜色的分割图）
             if (result[i].rotatedBox.size.width * result[i].rotatedBox.size.height > 0) {
-                DrawRotatedBox(img, result[i].rotatedBox, color[result[i].id], 2);
+                DrawRotatedBox(img, result[i].rotatedBox, color[cid], 2);
                 left = result[i].rotatedBox.center.x;
                 top = result[i].rotatedBox.center.y;
             }
             
             // add masked image to mvDynamicMask  2. 核心分类逻辑
             if (result[i].boxMask.rows && result[i].boxMask.cols > 0){
-                mask(result[i].box).setTo(color[result[i].id], result[i].boxMask);
+                cv::Rect box = result[i].box;
+                if (box.x >= 0 && box.y >= 0 && box.x + box.width <= mask.cols && box.y + box.height <= mask.rows)
+                    mask(box).setTo(color[cid], result[i].boxMask);
             }
             if (result[i].box.width <= 0 || result[i].box.height <= 0 || result[i].boxMask.empty())
                 continue;
                 
+            cv::Rect box = result[i].box;
+            if (box.x < 0 || box.y < 0 || box.x + box.width > mInstanceMap.cols || box.y + box.height > mInstanceMap.rows)
+                continue;
             // 检查当前物体的类别名称是否在"预设动态物体列表(mvDynamicNames)"中
             if (count(mvDynamicNames.begin(), mvDynamicNames.end(), className)){
-                mInstanceMap(result[i].box).setTo(cv::Scalar(255), result[i].boxMask);
+                mInstanceMap(box).setTo(cv::Scalar(255), result[i].boxMask);
             }
             else if (count(mvCandidateNames.begin(), mvCandidateNames.end(), className)){
                 // ✅ 使用稳定的全局ID，而不是临时的candidateID
-                // 找到该检测在candidateIndices中的位置
                 auto it = std::find(candidateIndices.begin(), candidateIndices.end(), i);
                 if (it != candidateIndices.end()) {
                     int idx = std::distance(candidateIndices.begin(), it);
-                    
-                    // 边界检查
                     if (idx >= 0 && idx < (int)globalIDs.size()) {
                         int stableID = globalIDs[idx];
-                        
                         if (stableID > 0 && stableID < 250) {
-                            mInstanceMap(result[i].box).setTo(cv::Scalar(stableID), result[i].boxMask);
+                            mInstanceMap(box).setTo(cv::Scalar(stableID), result[i].boxMask);
                         }
-                    } else {
-                        std::cerr << "[Detect] ERROR: idx=" << idx << " out of range, globalIDs.size()=" 
-                                  << globalIDs.size() << std::endl;
                     }
                 }
             }
             
             // 3. 统计映射（保持原样，供 Viewer 使用）
-            cv:: Rect2i DetectArea(left, top, (result[i].box.width), (result[i].box.height));
-            mmDetectMap[mpModel->_className[result[i].id]].push_back(DetectArea);
-           
+            cv::Rect2i DetectArea(left, top, result[i].box.width, result[i].box.height);
+            mmDetectMap[className].push_back(DetectArea);
         }
         if (mvDynamicArea.size() == 0)
         {

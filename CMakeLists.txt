@@ -53,14 +53,20 @@ if(ONNXRUNTIME_ROOT)
     set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
     set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
 else()
+    set(ONNXRUNTIME_SEARCH_PATHS
+        /usr/include /usr/local/include /opt/onnxruntime/include
+        $ENV{HOME}/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/include)
     find_path(ONNXRUNTIME_INCLUDE_DIR
               NAMES onnxruntime_cxx_api.h
-              PATHS /usr/include /usr/local/include /opt/onnxruntime/include
+              PATHS ${ONNXRUNTIME_SEARCH_PATHS}
               NO_DEFAULT_PATH)
 
+    set(ONNXRUNTIME_LIB_SEARCH_PATHS
+        /usr/lib /usr/local/lib /opt/onnxruntime/lib
+        $ENV{HOME}/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/lib)
     find_library(ONNXRUNTIME_LIB
                  NAMES onnxruntime libonnxruntime.so
-                 PATHS /usr/lib /usr/local/lib /opt/onnxruntime/lib
+                 PATHS ${ONNXRUNTIME_LIB_SEARCH_PATHS}
                  NO_DEFAULT_PATH)
 
     if(ONNXRUNTIME_LIB)
@@ -79,6 +85,33 @@ endif()
 
 # Option to enable CUDA execution provider linkage
 option(ONNXRUNTIME_USE_CUDA "Enable linking against ONNX Runtime CUDA provider" OFF)
+
+# TensorRT (for YOLO .engine inference)
+find_path(TENSORRT_INCLUDE_DIR NvInferRuntime.h
+    PATHS /usr/include/aarch64-linux-gnu /usr/include /usr/local/include
+    NO_DEFAULT_PATH)
+find_library(TENSORRT_LIBRARY_INFER nvinfer
+    PATHS /usr/lib/aarch64-linux-gnu /usr/lib /usr/local/lib
+    NO_DEFAULT_PATH)
+if(NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_LIBRARY_INFER)
+    message(FATAL_ERROR "TensorRT (NvInferRuntime.h, nvinfer) not found. Install libnvinfer-dev.")
+endif()
+message(STATUS "TensorRT include: ${TENSORRT_INCLUDE_DIR}")
+
+# CUDA (required by TensorRT runtime)
+find_path(CUDA_INCLUDE_DIR cuda_runtime_api.h
+    PATHS /usr/local/cuda/include /usr/local/cuda-12.6/include $ENV{CUDA_PATH}/include
+    NO_DEFAULT_PATH)
+find_library(CUDA_CUDART_LIBRARY cudart
+    PATHS /usr/local/cuda/lib64 /usr/local/cuda-12.6/targets/aarch64-linux/lib /usr/lib/aarch64-linux-gnu
+    NO_DEFAULT_PATH)
+if(NOT CUDA_INCLUDE_DIR)
+    message(FATAL_ERROR "CUDA include (cuda_runtime_api.h) not found.")
+endif()
+if(NOT CUDA_CUDART_LIBRARY)
+    message(FATAL_ERROR "CUDA library (cudart) not found.")
+endif()
+get_filename_component(CUDA_LIB_DIR ${CUDA_CUDART_LIBRARY} DIRECTORY)
 
 # Find OpenCV
 find_package(OpenCV 4.2)
@@ -103,6 +136,8 @@ include_directories(
         ${PROJECT_SOURCE_DIR}/Thirdparty/Sophus
         ${EIGEN3_INCLUDE_DIR}
         ${Pangolin_INCLUDE_DIRS}
+        ${TENSORRT_INCLUDE_DIR}
+        ${CUDA_INCLUDE_DIR}
 )
 
 # Set the library output directory
@@ -140,6 +175,7 @@ add_library(${PROJECT_NAME} SHARED
         src/Settings.cc
         src/YoloDetect.cpp
         src/yolov8_seg_onnx.cpp
+        src/yolov8_seg_trt.cpp
         src/yolov8_utils.cpp
         include/System.h
         include/Tracking.h
@@ -173,6 +209,7 @@ add_library(${PROJECT_NAME} SHARED
         include/Settings.h
         include/YoloDetect.h
         include/yolov8_seg_onnx.h
+        include/yolov8_seg_trt.h
         include/yolov8_utils.h
         )
 
@@ -183,14 +220,19 @@ add_library(${PROJECT_NAME} SHARED
 # Add the g2o library
 add_subdirectory(Thirdparty/g2o)
 
-# Link libraries
+# Link libraries (use target_link_directories so -L is passed, then -lonnxruntime)
+if(ONNXRUNTIME_LIB_DIR)
+    target_link_directories(${PROJECT_NAME} PRIVATE ${ONNXRUNTIME_LIB_DIR})
+endif()
 target_link_libraries(${PROJECT_NAME}
         ${OpenCV_LIBS}
         ${EIGEN3_LIBS}
         ${Pangolin_LIBRARIES}
         ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
         ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
-	onnxruntime
+        onnxruntime
+        ${TENSORRT_LIBRARY_INFER}
+        ${CUDA_CUDART_LIBRARY}
         boost_serialization
         crypto
         )

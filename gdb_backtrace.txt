@@ -1,0 +1,77 @@
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/aarch64-linux-gnu/libthread_db.so.1".
+The requested API version [20] is not available, only API versions [1, 19] are supported in this build. Current ORT Version is: 1.19.0
+
+ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+ORB-SLAM2 Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+This program comes with ABSOLUTELY NO WARRANTY;
+This is free software, and you are welcome to redistribute it
+under certain conditions. See LICENSE.txt.
+
+Input sensor was set to: RGB-D
+Loading settings from Examples/RGB-D/TUM3.yaml
+Camera1.k3 optional parameter does not exist...
+	-Loaded camera 1
+Camera.newHeight optional parameter does not exist...
+Camera.newWidth optional parameter does not exist...
+	-Loaded image info
+	-Loaded RGB-D calibration
+	-Loaded ORB settings
+Viewer.imageViewScale optional parameter does not exist...
+	-Loaded viewer settings
+System.LoadAtlasFromFile optional parameter does not exist...
+System.SaveAtlasToFile optional parameter does not exist...
+	-Loaded Atlas settings
+System.thFarPoints optional parameter does not exist...
+	-Loaded misc parameters
+----------------------------------
+SLAM settings: 
+	-Camera 1 parameters (Pinhole): [ 535.4 539.2 320.1 247.6 ]
+	-Camera 1 distortion parameters: [  0 0 0 0 ]
+	-Original image size: [ 640 , 480 ]
+	-Current image size: [ 640 , 480 ]
+	-Sequence FPS: 30
+	-RGB-D depth map factor: 5000
+	-Features per image: 2000
+	-ORB scale factor: 1.2
+	-ORB number of scales: 8
+	-Initial FAST threshold: 20
+	-Min FAST threshold: 7
+
+
+Loading ORB Vocabulary. This could take a while...
+Vocabulary loaded!
+
+Initialization of Atlas from scratch 
+Creation of new map with id: 0
+Creation of new map with last KF id: 0
+Loading Yolo model...
+[New Thread 0xffffca878840 (LWP 12555)]
+[TRT] Using an engine plan file across different models of devices is not recommended and is likely to affect performance or even cause errors.
+TensorRT warm up...
+TensorRT warm up done.
+read net ok!
+Seq. Name: 
+There are 1 cameras in the atlas
+Camera 0 is pinhole
+[Occlusion] Filter ENABLED
+[Dynamic] Geometric Check ENABLED
+[New Thread 0xffffd11ca840 (LWP 12556)]
+[New Thread 0xffffc99f5840 (LWP 12557)]
+
+-------
+Start processing sequence ...
+Images in the sequence: 827
+
+[ WARN:0@9.804] global /home/mickey/opencv/modules/imgcodecs/src/loadsave.cpp (239) findDecoder imread_('/home/mickey/Datasets/fr3_walking_xyz/rgb/1341846313.592026.png'): can't open/read file: check file path/integrity
+[ WARN:0@9.804] global /home/mickey/opencv/modules/imgcodecs/src/loadsave.cpp (239) findDecoder imread_('/home/mickey/Datasets/fr3_walking_xyz/depth/1341846313.592088.png'): can't open/read file: check file path/integrity
+
+Failed to load image at: /home/mickey/Datasets/fr3_walking_xyz/rgb/1341846313.592026.png
+[Thread 0xffffc99f5840 (LWP 12557) exited]
+[Thread 0xffffd11ca840 (LWP 12556) exited]
+[Thread 0xfffff7478840 (LWP 12463) exited]
+[Thread 0xffffca878840 (LWP 12555) exited]
+[New process 12463]
+[Inferior 1 (process 12463) exited with code 01]
+No stack.
+The program has no registers now.
