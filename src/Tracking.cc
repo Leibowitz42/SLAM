@@ -1513,6 +1513,7 @@ namespace ORB_SLAM3
         }
         mpORBextractorLeft->mInstanceMap = refinedMask;
         //std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
+        if (mpViewer)
         {
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
             //semantic infor to viewer
