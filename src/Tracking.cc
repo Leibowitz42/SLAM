@@ -109,6 +109,8 @@ namespace ORB_SLAM3
         // Load Occlusion Filter setting
         mbEnableOcclusionFilter = true; // Default
         mbEnableDynamicRemoval = true;   // Default (Proposed)
+        mbEnableTimingStats = true; // Default
+
         if (!settings) {
             cv::FileStorage fSettings(strSettingPath, cv::FileStorage::READ);
             if(fSettings.isOpened()) {
@@ -127,6 +129,14 @@ namespace ORB_SLAM3
                     nodeDyn >> enableRemoval;
                     mbEnableDynamicRemoval = (enableRemoval != 0);
                 }
+
+                // Timing Stats
+                cv::FileNode nodeTime = fSettings["Tracking.EnableTiming"];
+                if(!nodeTime.empty()) {
+                    int enableTiming = 1;
+                    nodeTime >> enableTiming;
+                    mbEnableTimingStats = (enableTiming != 0);
+                }
             }
         }
         
@@ -139,6 +149,11 @@ namespace ORB_SLAM3
             std::cout << "[Dynamic] Geometric Check ENABLED" << std::endl;
         else
             std::cout << "[Dynamic] Geometric Check DISABLED (Chair features kept)" << std::endl;
+
+        if(mbEnableTimingStats)
+            std::cout << "[Timing] Tracking Component Time Stats ENABLED" << std::endl;
+        else
+            std::cout << "[Timing] Tracking Component Time Stats DISABLED" << std::endl;
     }
 
 #ifdef REGISTER_TIMES
@@ -563,6 +578,31 @@ namespace ORB_SLAM3
     }
 
 #endif
+
+    void Tracking::PrintAverageTimes()
+    {
+        if(vdTotal_ms.empty()) return;
+        double sumYolo = 0, sumOrb = 0, sumPose = 0, sumGeom = 0, sumTotal = 0;
+        for (size_t i = 0; i < vdTotal_ms.size(); i++) {
+            sumYolo += vdYolo_ms[i];
+            sumOrb += vdORB_ms[i];
+            sumPose += vdPoseTrack_ms[i];
+            sumGeom += vdGeomCheck_ms[i];
+            sumTotal += vdTotal_ms[i];
+        }
+        double n = vdTotal_ms.size();
+
+        cout << endl << "========================================" << endl;
+        cout << "   Module Average Processing Time (ms)  " << endl;
+        cout << "========================================" << endl;
+        cout << " YOLO Segmentation : " << fixed << setprecision(3) << sumYolo/n << " ms" << endl;
+        cout << " ORB Extraction    : " << sumOrb/n << " ms" << endl;
+        cout << " Pose Tracking     : " << sumPose/n << " ms" << endl;
+        cout << " Dynamic GeomCheck : " << sumGeom/n << " ms" << endl;
+        cout << "----------------------------------------" << endl;
+        cout << " Total Per Frame   : " << sumTotal/n << " ms" << endl;
+        cout << "========================================" << endl << endl;
+    }
 
     Tracking::~Tracking()
     {
@@ -1497,137 +1537,120 @@ namespace ORB_SLAM3
     {
         mImGray = imRGB;
         cv::Mat imDepth = imD;
-        // Yolo11
-        cv::Mat InputImage;
-        InputImage = imRGB.clone();
-        //rgb to yolo
+        cv::Mat InputImage = imRGB.clone();
+
+        // ==========================================
+        // 模块 1. 测量 YOLO 语义分割耗时
+        // ==========================================
+        auto t0 = std::chrono::steady_clock::now();
         mpDetector->GetImage(InputImage);
         mpDetector->Detect();
-        //mask to orbextractor
-        // Mask Refinement: Erode the mask to preserve static features at object boundaries
+        auto t1 = std::chrono::steady_clock::now();
+        double time_yolo = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count();
+
+        // 掩码腐蚀处理
         cv::Mat refinedMask = mpDetector->mInstanceMap.clone();
         if (!refinedMask.empty()) {
-            // Using a 5x5 kernel for erosion; adjusts mask boundary inward
             cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
             cv::erode(refinedMask, refinedMask, element);
         }
         mpORBextractorLeft->mInstanceMap = refinedMask;
-        //std::cout << "Mask Type: " << mpDetector->mInstanceMap.type() << std::endl;
-        if (mpViewer)
-        {
+        
+        if (mpViewer) {
             std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
-            //semantic infor to viewer
             mpViewer->mmDetectMap = mpDetector->mmDetectMap;
             mpViewer->mask = mpDetector->mask.clone();
         }
 
-        if (mImGray.channels() == 3)
-        {
-            if (mbRGB)
-                cvtColor(mImGray, mImGray, cv::COLOR_RGB2GRAY);
-            else
-                cvtColor(mImGray, mImGray, cv::COLOR_BGR2GRAY);
-        }
-        else if (mImGray.channels() == 4)
-        {
-            if (mbRGB)
-                cvtColor(mImGray, mImGray, cv::COLOR_RGBA2GRAY);
-            else
-                cvtColor(mImGray, mImGray, cv::COLOR_BGRA2GRAY);
+        if (mImGray.channels() == 3) {
+            if (mbRGB) cvtColor(mImGray, mImGray, cv::COLOR_RGB2GRAY);
+            else cvtColor(mImGray, mImGray, cv::COLOR_BGR2GRAY);
+        } else if (mImGray.channels() == 4) {
+            if (mbRGB) cvtColor(mImGray, mImGray, cv::COLOR_RGBA2GRAY);
+            else cvtColor(mImGray, mImGray, cv::COLOR_BGRA2GRAY);
         }
 
         if ((fabs(mDepthMapFactor - 1.0f) > 1e-5) || imDepth.type() != CV_32F)
             imDepth.convertTo(imDepth, CV_32F, mDepthMapFactor);
 
+        // ==========================================
+        // 模块 2. 测量 ORB 特征提取耗时 (隐藏在 Frame 构造函数内)
+        // ==========================================
+        auto t2 = std::chrono::steady_clock::now();
         if (mSensor == System::RGBD)
             mCurrentFrame = Frame(mImGray, imDepth, timestamp, mpORBextractorLeft, mpORBVocabulary, mK, mDistCoef, mbf, mThDepth, mpCamera);
         else if (mSensor == System::IMU_RGBD)
             mCurrentFrame = Frame(mImGray, imDepth, timestamp, mpORBextractorLeft, mpORBVocabulary, mK, mDistCoef, mbf, mThDepth, mpCamera, &mLastFrame, *mpImuCalib);
+        auto t3 = std::chrono::steady_clock::now();
+        double time_orb = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t3 - t2).count();
 
         mCurrentFrame.mNameFile = filename;
         mCurrentFrame.mnDataset = mnNumDataset;
-        // 当你得到当前帧 mCurrentFrame 后
-        // Use the refined mask for geometric checks too, to avoid processing noisy borders
         mCurrentFrame.mInstanceMap = mpORBextractorLeft->mInstanceMap.clone(); 
-#ifdef REGISTER_TIMES
-        vdORBExtract_ms.push_back(mCurrentFrame.mTimeORB_Ext);
-#endif
 
+        // ==========================================
+        // 模块 3. 测量 Tracking 位姿求解耗时
+        // ==========================================
+        auto t4 = std::chrono::steady_clock::now();
         Track();
+        auto t5 = std::chrono::steady_clock::now();
+        double time_track = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t5 - t4).count();
 
-        // 2. 在清除数据前，执行几何检测
-        // Safety: ensure we have more than 1 keyframe (not just initialized) to avoid degenerate geometry
+        // ==========================================
+        // 模块 4. 测量动态几何校验耗时
+        // ==========================================
+        auto t6 = std::chrono::steady_clock::now();
         if(mState == OK && mbEnableDynamicRemoval && mpAtlas->GetAllKeyFrames().size() > 1) { 
-            // 1. 建立统计桶：记录每个 Instance ID 关联了哪些特征点
-            // Key: id, Value: 特征点索引 i 的列表
             std::map<uchar, std::vector<int>> instanceFeatureMapping;
-            
             for(int i = 0; i < mCurrentFrame.N; i++) {
                 int u_f = cvRound(mCurrentFrame.mvKeysUn[i].pt.x);
                 int v_f = cvRound(mCurrentFrame.mvKeysUn[i].pt.y);
-                
-                // 边界保护
                 if(u_f >= 0 && u_f < mCurrentFrame.mInstanceMap.cols && v_f >= 0 && v_f < mCurrentFrame.mInstanceMap.rows) {
                     uchar id = mCurrentFrame.mInstanceMap.at<uchar>(v_f, u_f);
-                    if(id > 0 && id < 255) { // 属于椅子的 ID
+                    if(id > 0 && id < 255) { 
                         instanceFeatureMapping[id].push_back(i);
                     }
                 }
             }
 
-            // 2. 针对每个出现在当前帧的椅子 ID，进行动态判定
             for(auto const& [id, featureIndices] : instanceFeatureMapping) {
-                
-                // 调用 CheckInstanceDynamic。内部应该利用多视角几何对比投影位置
-                // 如果你还没写好 CheckInstanceDynamic，它应该利用当前帧的特征点深度 vs 投影深度
                 std::vector<int> dynamicIndices;
                 bool isDynamic = CheckInstanceDynamic(mCurrentFrame, id, dynamicIndices);
-                
-                if(isDynamic) {
-                    mMoveConfirmCnt[id]++;
-                } else {
-                    mMoveConfirmCnt[id] = 0;
-                }
+                if(isDynamic) mMoveConfirmCnt[id]++; else mMoveConfirmCnt[id] = 0;
 
                 if(mMoveConfirmCnt[id] >= 2) {
-                    // 3. 改进策略：精准剔除 (Soft Removal)
-                    // 不再剔除该物体上的所有点 (featureIndices)，只剔除那些明显违反几何约束的 Outlier 点 (dynamicIndices)。
-                    // 这样即使椅子被误判为动，或者微动，我们也保留了大部分符合约束的静态特征点，防止 ATE 激增。
-                    
-                    int removedCount = 0;
-                    for(int idx : dynamicIndices) {
-                        if(mCurrentFrame.mvbOutlier[idx]) continue;
-
+                    for(int idx : featureIndices) {
                         mCurrentFrame.mvbOutlier[idx] = true;
                         mCurrentFrame.mvbDynamic[idx] = true;
                         if(mCurrentFrame.mvpMapPoints[idx]) {
                             mCurrentFrame.mvpMapPoints[idx]->SetBadFlag();
                             mCurrentFrame.mvpMapPoints[idx] = static_cast<MapPoint*>(NULL);
                         }
-                        removedCount++;
-                    }
-                    if(removedCount > 0) {
-                        cout << "[Dyna-Logic] Instance ID " << (int)id 
-                             << " (Chair) CONFIRMED DYNAMIC. Removed " << removedCount << " outliers (kept " 
-                             << featureIndices.size() - removedCount << " inliers)." << endl;
                     }
                 }
             }
-
-            // Remove IDs that are no longer in the current frame to enforce "consecutive"
             for(auto it = mMoveConfirmCnt.begin(); it != mMoveConfirmCnt.end(); ) {
-                // instanceFeatureMapping key is uchar, mMoveConfirmCnt key is int
-                if(instanceFeatureMapping.find((uchar)it->first) == instanceFeatureMapping.end()) {
-                    it = mMoveConfirmCnt.erase(it);
-                } else {
-                    ++it;
-                }
+                if(instanceFeatureMapping.find((uchar)it->first) == instanceFeatureMapping.end()) it = mMoveConfirmCnt.erase(it);
+                else ++it;
             }
         }
+        auto t7 = std::chrono::steady_clock::now();
+        double time_geom_check = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t7 - t6).count();
+        // =============== 打印单帧模块耗时分析 ===============
+        if(mbEnableTimingStats) {
+            cout << "[Timing ms] YOLO: " << time_yolo 
+                 << " | ORB: " << time_orb 
+                 << " | Pose Track: " << time_track 
+                 << " | Geom Check: " << time_geom_check 
+                 << " | TOTAL: " << (time_yolo + time_orb + time_track + time_geom_check) << " ms" << endl;
+        }
 
-        //clear
-        //mpDetector->mvDynamicArea.clear();
-        //mpDetector->mInstanceMap.release();
+        vdYolo_ms.push_back(time_yolo);
+        vdORB_ms.push_back(time_orb);
+        vdPoseTrack_ms.push_back(time_track);
+        vdGeomCheck_ms.push_back(time_geom_check);
+        vdTotal_ms.push_back(time_yolo + time_orb + time_track + time_geom_check);
+
         mpDetector->mmDetectMap.clear();
         mpDetector->mask.release();
 

@@ -74,3 +74,4 @@ Viewer.ViewpointF: 500.0
 #--------------------------------------------------------------------------------------------
 Occlusion.EnableFilter: 1
 Dynamic.EnableRemoval: 1
+Tracking.EnableTiming: 1

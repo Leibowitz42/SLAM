@@ -368,6 +368,11 @@ void System::Shutdown()
         SaveAtlas(FileType::BINARY_FILE);
     }
 
+    if(mpTracker)
+    {
+        mpTracker->PrintAverageTimes();
+    }
+
 #ifdef REGISTER_TIMES
     mpTracker->PrintTimeStats();
 #endif
