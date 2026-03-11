@@ -186,6 +186,7 @@ public:
     bool IsFrameOccluded(Frame &frame);
     bool mbEnableOcclusionFilter; // Flag to enable/disable occlusion filter (loaded from settings)
     bool mbEnableDynamicRemoval; // Flag to enable/disable dynamic object removal
+    bool mbEnableTimingStats;    // Flag to enable/disable tracking time output
     bool CheckInstanceDynamic(Frame &CurrentFrame, int InstanceID, std::vector<int>& outDynamicIndices);
 
 
@@ -209,6 +210,14 @@ public:
     vector<double> vdNewKF_ms;
     vector<double> vdTrackTotal_ms;
 #endif
+    // 无论 REGISTER_TIMES 宏是否可用都公开的向量，以方便统计所有的模块
+    vector<double> vdYolo_ms;
+    vector<double> vdORB_ms;
+    vector<double> vdPoseTrack_ms;
+    vector<double> vdGeomCheck_ms;
+    vector<double> vdTotal_ms;
+
+    void PrintAverageTimes();
 
 protected:
 

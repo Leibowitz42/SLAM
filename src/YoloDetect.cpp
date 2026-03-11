@@ -15,14 +15,23 @@ YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
+    // 这里只看模型路径的后缀来决定后端：
+    // - 以 .onnx 结尾 -> 使用 ONNX Runtime
+    // - 以 .engine 结尾 -> 使用 TensorRT
+    // 你只需要改下面这一行的文件名，保持后缀即可。
     std::string model_path_seg = "models/yolo26n-seg.onnx";
 
-    if (endsWith(model_path_seg, ".engine"))
+    if (endsWith(model_path_seg, ".engine")) {
         mpModel = new Yolov8SegTrt();
-    else
+    } else if (endsWith(model_path_seg, ".onnx")) {
         mpModel = new Yolov8SegOnnx();
+    } else {
+        std::cerr << "Unsupported model extension for: " << model_path_seg << std::endl;
+        mpModel = nullptr;
+        return;
+    }
 
-    if (mpModel->ReadModel(model_path_seg, true)) {
+    if (mpModel && mpModel->ReadModel(model_path_seg, true)) {
         std::cout << "read net ok!" << std::endl;
     } else {
         std::cout << "read net failed!" << std::endl;

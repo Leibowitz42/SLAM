@@ -47,31 +47,27 @@ add_definitions(-w)
 # Set the module path
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 
-option(ONNXRUNTIME_ROOT "Path to ONNX Runtime root (contains include/ and lib/)" "")
+# ONNX Runtime: detect include and lib (search also in $HOME/libs/onnxruntime)
+set(ONNXRUNTIME_SEARCH_PATHS
+    /usr/include /usr/local/include /opt/onnxruntime/include
+    $ENV{HOME}/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/include)
+find_path(ONNXRUNTIME_INCLUDE_DIR
+          NAMES onnxruntime_cxx_api.h
+          PATHS ${ONNXRUNTIME_SEARCH_PATHS}
+          NO_DEFAULT_PATH)
 
-if(ONNXRUNTIME_ROOT)
-    set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
-    set(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_ROOT}/lib)
+set(ONNXRUNTIME_LIB_SEARCH_PATHS
+    /usr/lib /usr/local/lib /opt/onnxruntime/lib
+    $ENV{HOME}/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/lib)
+find_library(ONNXRUNTIME_LIB
+             NAMES onnxruntime libonnxruntime.so
+             PATHS ${ONNXRUNTIME_LIB_SEARCH_PATHS}
+             NO_DEFAULT_PATH)
+
+if(ONNXRUNTIME_LIB)
+    get_filename_component(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_LIB} DIRECTORY)
 else()
-    set(ONNXRUNTIME_SEARCH_PATHS
-        /usr/include /usr/local/include /opt/onnxruntime/include
-        $ENV{HOME}/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/include)
-    find_path(ONNXRUNTIME_INCLUDE_DIR
-              NAMES onnxruntime_cxx_api.h
-              PATHS ${ONNXRUNTIME_SEARCH_PATHS}
-              NO_DEFAULT_PATH)
-
-    set(ONNXRUNTIME_LIB_SEARCH_PATHS
-        /usr/lib /usr/local/lib /opt/onnxruntime/lib
-        $ENV{HOME}/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/lib)
-    find_library(ONNXRUNTIME_LIB
-                 NAMES onnxruntime libonnxruntime.so
-                 PATHS ${ONNXRUNTIME_LIB_SEARCH_PATHS}
-                 NO_DEFAULT_PATH)
-
-    if(ONNXRUNTIME_LIB)
-        get_filename_component(ONNXRUNTIME_LIB_DIR ${ONNXRUNTIME_LIB} DIRECTORY)
-    endif()
+    message(FATAL_ERROR "onnxruntime library not found. Searched paths: ${ONNXRUNTIME_LIB_SEARCH_PATHS}")
 endif()
 
 if(NOT EXISTS "${ONNXRUNTIME_INCLUDE_DIR}/onnxruntime_cxx_api.h")
@@ -220,17 +216,14 @@ add_library(${PROJECT_NAME} SHARED
 # Add the g2o library
 add_subdirectory(Thirdparty/g2o)
 
-# Link libraries (use target_link_directories so -L is passed, then -lonnxruntime)
-if(ONNXRUNTIME_LIB_DIR)
-    target_link_directories(${PROJECT_NAME} PRIVATE ${ONNXRUNTIME_LIB_DIR})
-endif()
+# Link libraries
 target_link_libraries(${PROJECT_NAME}
         ${OpenCV_LIBS}
         ${EIGEN3_LIBS}
         ${Pangolin_LIBRARIES}
         ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
         ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
-        onnxruntime
+        ${ONNXRUNTIME_LIB}
         ${TENSORRT_LIBRARY_INFER}
         ${CUDA_CUDART_LIBRARY}
         boost_serialization

@@ -16,5 +16,6 @@ if ! command -v evo_ape &>/dev/null || ! command -v evo_rpe &>/dev/null; then
     exit 1
 fi
 
-evo_ape tum groundtruth.txt KeyFrameTrajectory.txt -v -a --plot
-evo_rpe tum groundtruth.txt CameraTrajectory.txt -va --delta 0.5 --delta_unit m --plot
+evo_ape tum groundtruth.txt KeyFrameTrajectory.txt -v -a
+evo_rpe tum groundtruth.txt CameraTrajectory.txt -va --delta 0.5 --delta_unit m
+evo_rpe tum groundtruth.txt CameraTrajectory.txt -va --pose_relation angle_deg --delta 0.5 --delta_unit m
