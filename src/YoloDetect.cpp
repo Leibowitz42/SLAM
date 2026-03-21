@@ -1,5 +1,8 @@
 #include <iostream>
 #include "yolov8_seg_onnx.h"
+#ifdef USE_TENSORRT
+#include "yolov8_seg_trt.h"
+#endif
 #include <opencv2/core.hpp> // For cv::Scalar
 #include<time.h>
 #include<opencv2/opencv.hpp>
@@ -8,16 +11,39 @@
 
 // using namespace dnn;
 // using namespace dnn;
+static bool endsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
     std::string model_path_seg = "models/yolo26n-seg.onnx";
 
-    mpModel = new Yolov8SegOnnx();
-	// loading model
-    if (mpModel->ReadModel(model_path_seg, true)) {
-		std:: cout << "read net ok!" << endl;
+#ifdef USE_TENSORRT
+    if (endsWith(model_path_seg, ".engine")) {
+        mpModel = new Yolov8SegTrt();
+    } else if (endsWith(model_path_seg, ".onnx")) {
+        mpModel = new Yolov8SegOnnx();
+    } else {
+        std::cerr << "Unsupported model extension for: " << model_path_seg << std::endl;
+        mpModel = nullptr;
+        return; // Exit constructor if model type is unsupported
+    }
+#else
+    if (endsWith(model_path_seg, ".onnx")) {
+        mpModel = new Yolov8SegOnnx();
+    } else {
+        std::cerr << "Only ONNX formats are supported on this PC setup: " << model_path_seg << std::endl;
+        mpModel = nullptr;
+        return; // Exit constructor if model type is unsupported
+    }
+#endif
+
+    // loading model
+    if (mpModel && mpModel->ReadModel(model_path_seg, true)) {
+		std:: cout << "read net ok!" << std::endl;
 	}
     else {
         std:: cout << "read net failed!" << endl;
@@ -78,7 +104,7 @@ bool YoloDetection::Detect()
     }
     std::vector<OutputParams> result;
     mInstanceMap = cv::Mat::zeros(image.size(), CV_8UC1);
-    if (mpModel->OnnxDetect(image, result)) {
+    if (mpModel->OnnxDetectGpu(image, result)) {
         
         // ========== 步骤1: 收集半动态物体的bbox和类别，用于实例跟踪 ==========
         std::vector<cv::Rect2f> candidateBboxes;

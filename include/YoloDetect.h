@@ -12,7 +12,7 @@
 #include <utility>
 #include <time.h>
 using namespace std;
-class Yolov8SegOnnx; // Forward declaration
+class IYolov8Seg; // Forward declaration
 
 class YoloDetection
 {
@@ -43,7 +43,7 @@ public:
     cv::Mat objectMask;
     cv::Mat mInstanceMap;
     // Model pointer to manage lifecycle correctly
-    Yolov8SegOnnx* mpModel;
+    IYolov8Seg* mpModel;
 
 private:
     // ========== 实例跟踪器 ==========

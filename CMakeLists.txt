@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.0)
-project(ORB_SLAM3)
+project(ORB_SLAM3 LANGUAGES CXX C CUDA)
 
 # Set the build type if not specified
 IF(NOT CMAKE_BUILD_TYPE)
@@ -48,15 +48,45 @@ set(ONNXRUNTIME_LIB_DIR /home/waitangwen/libs/onnxruntime/lib)
 include_directories(${ONNXRUNTIME_INCLUDE_DIR})
 link_directories(${ONNXRUNTIME_LIB_DIR})
 
+# Find CUDA
+find_package(CUDAToolkit REQUIRED)
+include_directories(${CUDAToolkit_INCLUDE_DIRS})
+
+# Set CUDA compilation flags
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
+set(CMAKE_CUDA_STANDARD 14)
+
 # Find OpenCV
 find_package(OpenCV 4.2)
 if(NOT OpenCV_FOUND)
-    message(FATAL_ERROR "OpenCV > 4.4 not found.")
+   message(FATAL_ERROR "OpenCV > 4.2 not found.")
+endif()
+
+# Optional TensorRT Support
+find_path(TENSORRT_INCLUDE_DIR NvInferRuntime.h PATHS /usr/include/aarch64-linux-gnu /usr/include /usr/local/include)
+find_library(TENSORRT_LIBRARY_INFER nvinfer PATHS /usr/lib/aarch64-linux-gnu /usr/lib /usr/local/lib)
+
+if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY_INFER)
+    message(STATUS "TensorRT found (${TENSORRT_INCLUDE_DIR}), enabling native TRT backend.")
+    add_definitions(-DUSE_TENSORRT)
+    include_directories(${TENSORRT_INCLUDE_DIR})
+    set(TRT_SOURCES src/yolov8_seg_trt.cpp)
+    set(TRT_LIBS ${TENSORRT_LIBRARY_INFER})
+else()
+    message(STATUS "TensorRT not found, using ONNX Runtime only.")
+    set(TRT_SOURCES "")
+    set(TRT_LIBS "")
 endif()
 
 # Print OpenCV version
 MESSAGE("OPENCV VERSION:")
 MESSAGE(${OpenCV_VERSION})
+
+# Find CUDA
+find_package(CUDAToolkit REQUIRED)
+if(CUDAToolkit_FOUND)
+    message(STATUS "CUDAToolkit Found")
+endif()
 
 # Find Eigen3, Pangolin, realsense2
 find_package(Eigen3 3.1.0 REQUIRED)
@@ -71,6 +101,8 @@ include_directories(
         ${PROJECT_SOURCE_DIR}/Thirdparty/Sophus
         ${EIGEN3_INCLUDE_DIR}
         ${Pangolin_INCLUDE_DIRS}
+        ${CUDAToolkit_INCLUDE_DIRS}
+        /usr/local/cuda/include
 )
 
 # Set the library output directory
@@ -108,7 +140,9 @@ add_library(${PROJECT_NAME} SHARED
         src/Settings.cc
         src/YoloDetect.cpp
         src/yolov8_seg_onnx.cpp
+        ${TRT_SOURCES}
         src/yolov8_utils.cpp
+        src/gpu_preprocess.cu
         include/System.h
         include/Tracking.h
         include/LocalMapping.h
@@ -155,6 +189,8 @@ target_link_libraries(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
         ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
 	onnxruntime
+        ${TRT_LIBS}
+        CUDA::cudart
         boost_serialization
         crypto
         )
@@ -181,10 +217,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/RGB-D)
 add_executable(rgbd_tum
         Examples/RGB-D/rgbd_tum.cc)
 target_link_libraries(rgbd_tum ${PROJECT_NAME})
-
-add_executable(trt_builder
-        trt_builder.cpp)
-target_link_libraries(trt_builder ${PROJECT_NAME})
 
 # If RealSense SDK is found, add the rgbd_realsense_D435i example
 if(realsense2_FOUND)

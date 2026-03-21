@@ -8,14 +8,20 @@
 #include<memory>
 #include <opencv2/opencv.hpp>
 #include "yolov8_utils.h"
+#include "gpu_preprocess.h"
+#include "IYolov8Seg.h"
 #include<onnxruntime_cxx_api.h>
 //#include <tensorrt_provider_factory.h>  //if use OrtTensorRTProviderOptionsV2
 //#include <onnxruntime_c_api.h>
 
-class Yolov8SegOnnx {
+class Yolov8SegOnnx : public IYolov8Seg {
 public:
-	Yolov8SegOnnx() :_OrtMemoryInfo(Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtDeviceAllocator, OrtMemType::OrtMemTypeCPUOutput)) {};
+	Yolov8SegOnnx() :
+		_OrtMemoryInfo(Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtDeviceAllocator, OrtMemType::OrtMemTypeCPUOutput)),
+		_OrtMemoryInfoCuda(Ort::MemoryInfo("Cuda", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeDefault))
+	{};
 	~Yolov8SegOnnx() {
+		gpuPreprocessDestroy(_gpuCtx);
 		if (_OrtSession != nullptr)
 			delete _OrtSession;
 	};// delete _OrtMemoryInfo;
@@ -28,18 +34,25 @@ public:
 	* \param[in] cudaID:if isCuda==true,run Ort-GPU on cudaID.
 	* \param[in] warmUp:if isCuda==true,warm up GPU-model.
 	*/
-	bool ReadModel(const std::string& modelPath, bool isCuda = false, int cudaID = 0, bool warmUp = true);
+	bool ReadModel(const std::string& modelPath, bool isCuda = false, int cudaID = 0, bool warmUp = true) override;
 
 	/** \brief  detect.
 	* \param[in] srcImg:a 3-channels image.
 	* \param[out] output:detection results of input image.
 	*/
-	bool OnnxDetect(cv::Mat& srcImg, std::vector<OutputParams>& output);
+	bool OnnxDetect(cv::Mat& srcImg, std::vector<OutputParams>& output) override;
+
+	/** \brief  detect with GPU preprocessing (zero CPU pixel touching).
+	* \param[in] srcImg:a 3-channels image (BGR, uint8).
+	* \param[out] output:detection results of input image.
+	*/
+	bool OnnxDetectGpu(cv::Mat& srcImg, std::vector<OutputParams>& output) override;
+
 	/** \brief  detect,batch size= _batchSize
 	* \param[in] srcImg:A batch of images.
 	* \param[out] output:detection results of input images.
 	*/
-	bool OnnxBatchDetect(std::vector<cv::Mat>& srcImg, std::vector<std::vector<OutputParams>>& output);
+	bool OnnxBatchDetect(std::vector<cv::Mat>& srcImg, std::vector<std::vector<OutputParams>>& output) override;
 
 private:
 
@@ -65,6 +78,11 @@ private:
 	Ort::SessionOptions _OrtSessionOptions = Ort::SessionOptions();
 	Ort::Session* _OrtSession = nullptr;
 	Ort::MemoryInfo _OrtMemoryInfo;
+	Ort::MemoryInfo _OrtMemoryInfoCuda;
+
+	// GPU Preprocessing context
+	GpuPreprocessContext _gpuCtx;
+	bool _gpuPreprocessInited = false;
 #if ORT_API_VERSION < ORT_OLD_VISON
 
 	char* _inputName, * _output_name0, * _output_name1;
@@ -83,16 +101,4 @@ private:
 	std::vector<int64_t> _inputTensorShape;
 	std::vector<int64_t> _outputTensorShape;
 	std::vector<int64_t> _outputMaskTensorShape;
-public:
-	std::vector<std::string> _className = {
-		"person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-		"fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-		"elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-		"skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
-		"tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-		"sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-		"potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-		"microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-		"hair drier", "toothbrush"
-	};
 };
