@@ -19,7 +19,13 @@ YoloDetection::YoloDetection()
 {
     std::cout << "Loading Yolo model..." << std::endl;
 
+#ifdef USE_TENSORRT
+    // When compiled on Jetson/TensorRT, default to the Hardware engine backend. 
+    std::string model_path_seg = "models/yolo26n-seg.engine";
+#else
+    // When compiled on PC, default to the ONNX graph backend.
     std::string model_path_seg = "models/yolo26n-seg.onnx";
+#endif
 
 #ifdef USE_TENSORRT
     if (endsWith(model_path_seg, ".engine")) {
