@@ -119,6 +119,57 @@ void gpuPreprocessInit(GpuPreprocessContext& ctx,
 }
 
 
+void gpuPreprocessExecuteDirect(GpuPreprocessContext& ctx,
+                                const uint8_t* src_data,
+                                int src_width, int src_height, int src_step,
+                                float* external_dst_ptr)
+{
+    ctx.src_width = src_width;
+    ctx.src_height = src_height;
+
+    cudaStream_t cuda_stream = (cudaStream_t)ctx.stream;
+
+    // Compute LetterBox parameters (same logic as CPU LetterBox)
+    float r_w = (float)ctx.dst_width / (float)src_width;
+    float r_h = (float)ctx.dst_height / (float)src_height;
+    ctx.ratio = std::min(r_w, r_h);
+
+    int new_unpad_w = (int)(src_width * ctx.ratio + 0.5f);
+    int new_unpad_h = (int)(src_height * ctx.ratio + 0.5f);
+
+    ctx.pad_w = (ctx.dst_width - new_unpad_w) / 2.0f;
+    ctx.pad_h = (ctx.dst_height - new_unpad_h) / 2.0f;
+
+    // Upload source image to GPU (async)
+    size_t src_bytes = (size_t)src_step * src_height;
+    if (src_bytes > ctx.max_src_bytes) {
+        std::cerr << "[GPU Preprocess] WARNING: Reallocating src buffer from "
+                  << ctx.max_src_bytes << " to " << src_bytes << " bytes" << std::endl;
+        cudaFree(ctx.d_src);
+        ctx.max_src_bytes = src_bytes;
+        uint8_t* d_src_ptr = nullptr;
+        cudaMalloc(&d_src_ptr, ctx.max_src_bytes);
+        ctx.d_src = d_src_ptr;
+    }
+
+    cudaMemcpyAsync(ctx.d_src, src_data, src_bytes,
+                    cudaMemcpyHostToDevice, cuda_stream);
+
+    dim3 block(32, 32);
+    dim3 grid((ctx.dst_width + block.x - 1) / block.x,
+              (ctx.dst_height + block.y - 1) / block.y);
+
+    // Pass the external hardware pointer to swallow the compute result directly
+    preprocessKernel<<<grid, block, 0, cuda_stream>>>(
+        (const uint8_t*)ctx.d_src, external_dst_ptr,
+        src_width, src_height, src_step,
+        ctx.dst_width, ctx.dst_height,
+        ctx.ratio, ctx.pad_w, ctx.pad_h
+    );
+
+    // NOT performing cudaStreamSynchronize here explicitly to let TensorRT stack operations!
+}
+
 void gpuPreprocessExecute(GpuPreprocessContext& ctx,
                           const uint8_t* src_data,
                           int src_width, int src_height, int src_step)

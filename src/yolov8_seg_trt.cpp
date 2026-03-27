@@ -202,16 +202,15 @@ bool Yolov8SegTrt::OnnxDetectGpu(cv::Mat& srcImg, std::vector<OutputParams>& out
         _gpuPreprocessInited = true;
     }
     
-    // Use the optimized GPU fused kernel to prepare the tensor directly on VRAM.
-    gpuPreprocessExecute(_gpuCtx, srcImg.data, srcImg.cols, srcImg.rows, (int)srcImg.step);
-    
     cudaStream_t stream = static_cast<cudaStream_t>(_stream);
 
-    // Instead of copying host-to-device, we copy device-to-device! 
-    // _gpuCtx.d_dst -> _inputDevice
-    if (cudaMemcpyAsync(_inputDevice, _gpuCtx.d_dst, _inputSize, cudaMemcpyDeviceToDevice, stream) != cudaSuccess) {
-        return false;
-    }
+    // EVOLUTION 2.0: True UMA Zero-Copy. The raw image writes its output directly into TensorRT's bindings buffer!
+    // No D2D copy overhead. No memory controller congestion.
+    gpuPreprocessExecuteDirect(_gpuCtx, srcImg.data, srcImg.cols, srcImg.rows, (int)srcImg.step, 
+                               static_cast<float*>(_inputDevice));
+                               
+    // Sync the preprocessing stream strictly before enqueueing TRT graph on its own stream
+    cudaStreamSynchronize(static_cast<cudaStream_t>(_gpuCtx.stream));
 
     nvinfer1::IExecutionContext* ctx = static_cast<nvinfer1::IExecutionContext*>(_context);
     if (!ctx->enqueueV3(stream)) return false;
