@@ -16,6 +16,7 @@ bool Yolov8SegOnnx::ReadModel(const std::string& modelPath, bool isCuda, int cud
 		auto trt_available = std::find(available_providers.begin(), available_providers.end(), "TensorrtExecutionProvider");
 
 		if (isCuda && (cuda_available != available_providers.end()))
+		{
 			std::cout << "************* Infer model on GPU! *************" << std::endl;
 // Only link ONNX CUDA explicitly if not on Jetson native TensorRT mode
 // Since Jetson uses Native TRT, the ONNX Runtime loaded is likely CPU-only and lacks this symbol.
