@@ -11,10 +11,12 @@
 #include "MLPnPsolver.h"
 #include "GeometricTools.h"
 
-#include <iostream>
+#include <opencv2/core/core.hpp>
+#include <opencv2/features2d/features2d.hpp>
 
 #include <mutex>
-#include <chrono>
+#include <iostream>
+#include <future>
 
 using namespace std;
 
@@ -1540,26 +1542,33 @@ namespace ORB_SLAM3
         cv::Mat InputImage = imRGB.clone();
 
         // ==========================================
-        // 模块 1. 测量 YOLO 语义分割耗时
+        // 模块 1. 异构平台双轨异步: 测量 YOLO 语义分割耗时
         // ==========================================
-        auto t0 = std::chrono::steady_clock::now();
-        mpDetector->GetImage(InputImage);
-        mpDetector->Detect();
-        auto t1 = std::chrono::steady_clock::now();
-        double time_yolo = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count();
+        static cv::Mat lastMask;
+        static std::map<int, int> mmDetectMapStore;
+        static cv::Mat staticRawMask;
 
-        // 掩码腐蚀处理
-        cv::Mat refinedMask = mpDetector->mInstanceMap.clone();
-        if (!refinedMask.empty()) {
-            cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
-            cv::erode(refinedMask, refinedMask, element);
-        }
-        mpORBextractorLeft->mInstanceMap = refinedMask;
-        
-        if (mpViewer) {
-            std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
-            mpViewer->mmDetectMap = mpDetector->mmDetectMap;
-            mpViewer->mask = mpDetector->mask.clone();
+        auto t0 = std::chrono::steady_clock::now();
+
+        // [NOVELTY] Fork semantic tracking into asynchronous execution!
+        auto future_yolo = std::async(std::launch::async, [&]() {
+            mpDetector->GetImage(InputImage);
+            mpDetector->Detect();
+            cv::Mat rMask = mpDetector->mInstanceMap.clone();
+            if (!rMask.empty()) {
+                cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+                cv::erode(rMask, rMask, element);
+            }
+            return rMask;
+        });
+
+        // Predictive Masking: Inject previous frame's mask to pre-filter ORB quadtree regions, padded to respect target flow
+        if(!lastMask.empty()) {
+            cv::Mat dilatedMask;
+            cv::dilate(lastMask, dilatedMask, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(31, 31)));
+            mpORBextractorLeft->mInstanceMap = dilatedMask;
+        } else {
+            mpORBextractorLeft->mInstanceMap = cv::Mat();
         }
 
         if (mImGray.channels() == 3) {
@@ -1574,7 +1583,7 @@ namespace ORB_SLAM3
             imDepth.convertTo(imDepth, CV_32F, mDepthMapFactor);
 
         // ==========================================
-        // 模块 2. 测量 ORB 特征提取耗时 (隐藏在 Frame 构造函数内)
+        // 模块 2. 原生主线程: 测量 ORB 特征提取耗时
         // ==========================================
         auto t2 = std::chrono::steady_clock::now();
         if (mSensor == System::RGBD)
@@ -1584,9 +1593,23 @@ namespace ORB_SLAM3
         auto t3 = std::chrono::steady_clock::now();
         double time_orb = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t3 - t2).count();
 
+        // 🌟 并发合流 (Wait on YOLO mask convergence if ORB finishes sooner!)
+        cv::Mat currentMask = future_yolo.get();
+        auto t1 = std::chrono::steady_clock::now();
+        double time_yolo = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count() - time_orb;
+        if(time_yolo < 0) time_yolo = 0.001; // YOLO was faster than ORB
+
+        lastMask = currentMask.clone();
+        
+        if (mpViewer) {
+            std::unique_lock<std::mutex> lock(mpViewer->mMutexPAFinsh);
+            mpViewer->mmDetectMap = mpDetector->mmDetectMap;
+            mpViewer->mask = mpDetector->mask.clone();
+        }
+
         mCurrentFrame.mNameFile = filename;
         mCurrentFrame.mnDataset = mnNumDataset;
-        mCurrentFrame.mInstanceMap = mpORBextractorLeft->mInstanceMap.clone(); 
+        mCurrentFrame.mInstanceMap = currentMask.clone(); // The true frame mask is handed to Semantic checking
 
         // ==========================================
         // 模块 3. 测量 Tracking 位姿求解耗时

@@ -21,7 +21,7 @@ public:
 		_OrtMemoryInfoCuda(Ort::MemoryInfo("Cuda", OrtAllocatorType::OrtDeviceAllocator, 0, OrtMemType::OrtMemTypeDefault))
 	{};
 	~Yolov8SegOnnx() {
-		gpuPreprocessDestroy(_gpuCtx);
+		// gpuPreprocessDestroy(_gpuCtx);
 		if (_OrtSession != nullptr)
 			delete _OrtSession;
 	};// delete _OrtMemoryInfo;

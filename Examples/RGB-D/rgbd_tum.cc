@@ -24,7 +24,7 @@
 #include<opencv2/core/core.hpp>
 
 #include<System.h>
-#include "CudaPinnedAllocator.h"
+// #include "CudaPinnedAllocator.h"
 
 using namespace std;
 
@@ -40,7 +40,7 @@ int main(int argc, char **argv)
     }
 
     // Set custom OpenCV allocator for zero-copy unified memory / pinned memory speedups
-    SetCudaPinnedAllocator();
+    // SetCudaPinnedAllocator();
 
     // Retrieve paths to images
     vector<string> vstrImageFilenamesRGB;
