@@ -42,8 +42,15 @@ add_definitions(-w)
 # Set the module path
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 
-set(ONNXRUNTIME_INCLUDE_DIR /home/waitangwen/libs/onnxruntime/include)
-set(ONNXRUNTIME_LIB_DIR /home/waitangwen/libs/onnxruntime/lib)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+    # Jetson Orin Nano (ARM64)
+    set(ONNXRUNTIME_INCLUDE_DIR /home/mickey/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/include)
+    set(ONNXRUNTIME_LIB_DIR /home/mickey/libs/onnxruntime/onnxruntime-linux-aarch64-1.20.0/lib)
+else()
+    # Desktop PC (x86_64)
+    set(ONNXRUNTIME_INCLUDE_DIR /home/waitangwen/libs/onnxruntime/include)
+    set(ONNXRUNTIME_LIB_DIR /home/waitangwen/libs/onnxruntime/lib)
+endif()
 
 include_directories(${ONNXRUNTIME_INCLUDE_DIR})
 link_directories(${ONNXRUNTIME_LIB_DIR})
@@ -70,7 +77,7 @@ if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY_INFER)
     message(STATUS "TensorRT found (${TENSORRT_INCLUDE_DIR}), enabling native TRT backend.")
     add_definitions(-DUSE_TENSORRT)
     include_directories(${TENSORRT_INCLUDE_DIR})
-    set(TRT_SOURCES src/yolov8_seg_trt.cpp)
+    set(TRT_SOURCES src/yolov8_seg_trt.cpp src/gpu_preprocess.cu)
     set(TRT_LIBS ${TENSORRT_LIBRARY_INFER})
 else()
     message(STATUS "TensorRT not found, using ONNX Runtime only.")
@@ -142,7 +149,6 @@ add_library(${PROJECT_NAME} SHARED
         src/yolov8_seg_onnx.cpp
         ${TRT_SOURCES}
         src/yolov8_utils.cpp
-        src/gpu_preprocess.cu
         include/System.h
         include/Tracking.h
         include/LocalMapping.h

@@ -110,7 +110,11 @@ bool YoloDetection::Detect()
     }
     std::vector<OutputParams> result;
     mInstanceMap = cv::Mat::zeros(image.size(), CV_8UC1);
+#ifdef USE_TENSORRT
+    if (mpModel->OnnxDetectGpu(image, result)) {
+#else
     if (mpModel->OnnxDetect(image, result)) {
+#endif
         
         // ========== 步骤1: 收集半动态物体的bbox和类别，用于实例跟踪 ==========
         std::vector<cv::Rect2f> candidateBboxes;
