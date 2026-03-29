@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0)
+cmake_minimum_required(VERSION 3.20)
 project(ORB_SLAM3 LANGUAGES CXX C CUDA)
 
 # Set the build type if not specified
