@@ -8,6 +8,16 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
+# 设置全局字体大小，让图表上的数字和文字更清晰
+plt.rcParams.update({
+    'font.size': 14,          # 全局默认字体大小
+    'axes.titlesize': 18,     # 子图标题大小
+    'axes.labelsize': 16,     # x轴和y轴标签大小
+    'xtick.labelsize': 14,    # x轴刻度数字大小
+    'ytick.labelsize': 14,    # y轴刻度数字大小
+    'legend.fontsize': 14     # 图例大小
+})
+
 def parse_tegrastats(file_path):
     if not os.path.exists(file_path):
         print(f"错误: 文件 {file_path} 不存在")

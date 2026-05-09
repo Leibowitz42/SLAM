@@ -32,7 +32,16 @@ public:
             u->data = u->origdata = static_cast<uchar*>(data);
             u->flags |= cv::UMatData::USER_ALLOCATED;
         } else {
-            // Use cudaHostAlloc for pinned memory allocation
+            // =====================================================================
+            // [NOVELTY 2]: Zero-Copy Memory Allocation for UMA Architecture
+            // =====================================================================
+            // Instead of standard malloc/new, we allocate OpenCV Mat data directly 
+            // on the CUDA Host using cudaHostAlloc with the cudaHostAllocMapped flag.
+            // On Jetson (Unified Memory Architecture), CPU and GPU share physical RAM.
+            // Pinned (Page-locked) memory prevents the OS from paging out the buffer,
+            // and the 'Mapped' flag exposes this exact physical address space to 
+            // the GPU's page tables. This entirely eliminates expensive Host-to-Device 
+            // (H2D) and Device-to-Host (D2H) cudaMemcpy operations during YOLO inference.
             void* ptr = nullptr;
             cudaError_t err = cudaHostAlloc(&ptr, total, cudaHostAllocMapped);
             if (err != cudaSuccess) {

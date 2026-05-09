@@ -1550,11 +1550,18 @@ namespace ORB_SLAM3
 
         auto t0 = std::chrono::steady_clock::now();
 
-        // [NOVELTY] Fork semantic tracking into asynchronous execution!
+        // =========================================================================
+        // [NOVELTY 1]: Asynchronous Mask Propagation (AMP) Mechanism
+        // =========================================================================
+        // We fork the YOLOv8 semantic segmentation into an asynchronous thread.
+        // This decouples the heavy neural network inference from the main ORB 
+        // tracking thread, preventing frame drops in the SLAM system.
         auto future_yolo = std::async(std::launch::async, [&]() {
             mpDetector->GetImage(InputImage);
             mpDetector->Detect();
             cv::Mat rMask = mpDetector->mInstanceMap.clone();
+            // Erosion shrinks the mask slightly to prevent rejecting valid edge 
+            // features belonging to the static background behind dynamic objects.
             if (!rMask.empty()) {
                 cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
                 cv::erode(rMask, rMask, element);
@@ -1562,11 +1569,15 @@ namespace ORB_SLAM3
             return rMask;
         });
 
-        // Predictive Masking: Inject previous frame's mask to pre-filter ORB quadtree regions, padded to respect target flow
+        // Predictive Masking (Mask Propagation):
+        // Since YOLO is running asynchronously, we cannot use its mask immediately 
+        // to filter ORB extraction for THIS frame. Instead, we propagate the mask 
+        // from the previous frame (t-1). We heavily dilate it (31x31) to account 
+        // for any potential movement of the object between frames.
         if(!lastMask.empty()) {
             cv::Mat dilatedMask;
             cv::dilate(lastMask, dilatedMask, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(31, 31)));
-            mpORBextractorLeft->mInstanceMap = dilatedMask;
+            mpORBextractorLeft->mInstanceMap = dilatedMask; // Pre-filter features in ORB quadtree
         } else {
             mpORBextractorLeft->mInstanceMap = cv::Mat();
         }
@@ -1582,9 +1593,9 @@ namespace ORB_SLAM3
         if ((fabs(mDepthMapFactor - 1.0f) > 1e-5) || imDepth.type() != CV_32F)
             imDepth.convertTo(imDepth, CV_32F, mDepthMapFactor);
 
-        // ==========================================
-        // 模块 2. 原生主线程: 测量 ORB 特征提取耗时
-        // ==========================================
+        // =========================================================================
+        // Main Thread: Execute ORB Extraction concurrently with YOLO
+        // =========================================================================
         auto t2 = std::chrono::steady_clock::now();
         if (mSensor == System::RGBD)
             mCurrentFrame = Frame(mImGray, imDepth, timestamp, mpORBextractorLeft, mpORBVocabulary, mK, mDistCoef, mbf, mThDepth, mpCamera);
@@ -1593,12 +1604,17 @@ namespace ORB_SLAM3
         auto t3 = std::chrono::steady_clock::now();
         double time_orb = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t3 - t2).count();
 
-        // 🌟 并发合流 (Wait on YOLO mask convergence if ORB finishes sooner!)
+        // =========================================================================
+        // Thread Synchronization & Latency Compensation
+        // =========================================================================
+        // Wait for the YOLO thread to finish. Because ORB extraction takes ~10-15ms 
+        // and YOLO takes ~15ms, they overlap perfectly, hiding the YOLO latency!
         cv::Mat currentMask = future_yolo.get();
         auto t1 = std::chrono::steady_clock::now();
         double time_yolo = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t1 - t0).count() - time_orb;
-        if(time_yolo < 0) time_yolo = 0.001; // YOLO was faster than ORB
+        if(time_yolo < 0) time_yolo = 0.001; // YOLO finished before ORB
 
+        // Save the precise mask to propagate to the next frame
         lastMask = currentMask.clone();
         
         if (mpViewer) {
@@ -1609,7 +1625,8 @@ namespace ORB_SLAM3
 
         mCurrentFrame.mNameFile = filename;
         mCurrentFrame.mnDataset = mnNumDataset;
-        mCurrentFrame.mInstanceMap = currentMask.clone(); // The true frame mask is handed to Semantic checking
+        // The precise current mask is passed down for the Fine Geometric Checking
+        mCurrentFrame.mInstanceMap = currentMask.clone();
 
         // ==========================================
         // 模块 3. 测量 Tracking 位姿求解耗时

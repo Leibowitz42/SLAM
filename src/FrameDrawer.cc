@@ -134,6 +134,38 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
     if(im.channels()<3) //this should be always true
         cvtColor(im,im,cv::COLOR_GRAY2BGR);
 
+    // ==========================================
+    // [Added for Paper Visualization]: Render YOLO mask overlay
+    // ==========================================
+    if(state == Tracking::OK && !currentFrame.mInstanceMap.empty())
+    {
+        cv::Mat maskColored = cv::Mat::zeros(im.size(), CV_8UC3);
+        bool hasMask = false;
+        for (int y = 0; y < currentFrame.mInstanceMap.rows; y++) {
+            for (int x = 0; x < currentFrame.mInstanceMap.cols; x++) {
+                uchar id = currentFrame.mInstanceMap.at<uchar>(y, x);
+                if (id == 255) { // Absolute dynamic (e.g., Person)
+                    int drawX = (imageScale != 1.f) ? (x / imageScale) : x;
+                    int drawY = (imageScale != 1.f) ? (y / imageScale) : y;
+                    if(drawX < maskColored.cols && drawY < maskColored.rows) {
+                        maskColored.at<cv::Vec3b>(drawY, drawX) = cv::Vec3b(100, 100, 255); // Red/Pink overlay
+                        hasMask = true;
+                    }
+                } else if (id > 0) { // Semi-dynamic (e.g., Chair)
+                    int drawX = (imageScale != 1.f) ? (x / imageScale) : x;
+                    int drawY = (imageScale != 1.f) ? (y / imageScale) : y;
+                    if(drawX < maskColored.cols && drawY < maskColored.rows) {
+                        maskColored.at<cv::Vec3b>(drawY, drawX) = cv::Vec3b(255, 150, 100); // Blue overlay
+                        hasMask = true;
+                    }
+                }
+            }
+        }
+        if (hasMask) {
+            cv::addWeighted(im, 1.0, maskColored, 0.45, 0, im);
+        }
+    }
+
     //Draw
     if(state==Tracking::NOT_INITIALIZED)
     {
@@ -267,6 +299,13 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
 
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
+
+    // [Added for user] Automatically save images every 50 frames for qualitative comparison
+    if(state == Tracking::OK && currentFrame.mnId > 0 && currentFrame.mnId % 50 == 0)
+    {
+        std::string filename = "comparison_frame_" + std::to_string(currentFrame.mnId) + ".png";
+        cv::imwrite(filename, imWithInfo);
+    }
 
     return imWithInfo;
 }

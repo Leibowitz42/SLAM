@@ -358,18 +358,23 @@ void Viewer::Run()
             }
         }
 
-        if (toShow.size() != mask.size()){
+        // [REMOVED]: We now draw the mask beautifully inside FrameDrawer.cc
+        // so we don't need to blend it here anymore. This also avoids OpenCV exceptions.
+        /*
+        if(!mask.empty() && toShow.size() != mask.size()){
             cv::resize(mask, mask, cv::Size(toShow.cols, toShow.rows));
         }
-        // std:: cout<<"toShow.size() = "<<toShow.size()<< " mask.size() = "<<mask.size()<<std::endl;
 
-        // cv::Mat mask3Channel;
-        // cv::cvtColor(mask, mask3Channel, cv::COLOR_GRAY2BGR);
-
-        // Blend the two images
-        // cv::addWeighted(toShow, 0.7, mask3Channel, 0.3, 0, toShow);
-
-        cv::addWeighted(toShow, 0.7, mask, 0.3, 0, toShow);
+        if(!mask.empty()){
+            if(mask.channels() == 1) {
+                cv::Mat mask3Channel;
+                cv::cvtColor(mask, mask3Channel, cv::COLOR_GRAY2BGR);
+                cv::addWeighted(toShow, 0.7, mask3Channel, 0.3, 0, toShow);
+            } else {
+                cv::addWeighted(toShow, 0.7, mask, 0.3, 0, toShow);
+            }
+        }
+        */
         cv::imshow("YDM-SLAM: Current Frame",toShow);
         cv::waitKey(mT);
 
