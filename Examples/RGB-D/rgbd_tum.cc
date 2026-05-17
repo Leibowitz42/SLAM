@@ -24,12 +24,14 @@
 #include<opencv2/core/core.hpp>
 
 #include<System.h>
-// #include "CudaPinnedAllocator.h"
+#include "CudaPinnedAllocator.h"
 
 using namespace std;
 
 void LoadImages(const string &strAssociationFilename, vector<string> &vstrImageFilenamesRGB,
                 vector<string> &vstrImageFilenamesD, vector<double> &vTimestamps);
+
+#define USE_UMA_ZERO_COPY 0 // Set to 0 to test Baseline, 1 to test Ours (Zero-Copy)
 
 int main(int argc, char **argv)
 {
@@ -39,8 +41,18 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Set custom OpenCV allocator for zero-copy unified memory / pinned memory speedups
-    // SetCudaPinnedAllocator();
+#if USE_UMA_ZERO_COPY
+    cout << "\n==================================================" << endl;
+    cout << " [ABLATION] UMA ZERO-COPY IS ENABLED (OURS)" << endl;
+    cout << " OpenCV cv::Mat will use cudaHostAllocMapped." << endl;
+    cout << "==================================================\n" << endl;
+    SetCudaPinnedAllocator();
+#else
+    cout << "\n==================================================" << endl;
+    cout << " [ABLATION] UMA ZERO-COPY IS DISABLED (BASELINE)" << endl;
+    cout << " OpenCV cv::Mat will use standard malloc." << endl;
+    cout << "==================================================\n" << endl;
+#endif
 
     // Retrieve paths to images
     vector<string> vstrImageFilenamesRGB;
@@ -63,7 +75,7 @@ int main(int argc, char **argv)
     }
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
-    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::RGBD,false);
+    ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::RGBD,true);
     float imageScale = SLAM.GetImageScale();
     // Vector for tracking time statistics
     vector<float> vTimesTrack;

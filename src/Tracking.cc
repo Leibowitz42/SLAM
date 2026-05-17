@@ -1566,6 +1566,22 @@ namespace ORB_SLAM3
                 cv::Mat element = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
                 cv::erode(rMask, rMask, element);
             }
+
+            /*
+            // =========================================================
+            // [Added for Paper Visualization]: Save eroded mask to disk
+            // =========================================================
+            static int mask_save_counter = 0;
+            mask_save_counter++;
+            // Save 3 consecutive frames (e.g., 100, 101, 102) for paper figures
+            if((mask_save_counter == 100 || mask_save_counter == 101 || mask_save_counter == 102) && !rMask.empty()) {
+                cv::Mat visMask;
+                // Convert low ID values (e.g., chairs ID 1, 2) to 255 (white) for clear visibility
+                cv::threshold(rMask, visMask, 0, 255, cv::THRESH_BINARY);
+                std::string filename = "eroded_mask_" + std::to_string(mask_save_counter) + ".png";
+                cv::imwrite(filename, visMask);
+            }
+            */
             return rMask;
         });
 
@@ -1574,10 +1590,29 @@ namespace ORB_SLAM3
         // to filter ORB extraction for THIS frame. Instead, we propagate the mask 
         // from the previous frame (t-1). We heavily dilate it (31x31) to account 
         // for any potential movement of the object between frames.
+        static int dilated_save_counter = 0;
+        dilated_save_counter++;
+
         if(!lastMask.empty()) {
             cv::Mat dilatedMask;
             cv::dilate(lastMask, dilatedMask, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(31, 31)));
             mpORBextractorLeft->mInstanceMap = dilatedMask; // Pre-filter features in ORB quadtree
+
+            /*
+            // =========================================================
+            // [Added for Paper Visualization]: Save dilated mask to disk
+            // =========================================================
+            if(dilated_save_counter == 100 || dilated_save_counter == 101 || dilated_save_counter == 102) {
+                cv::Mat visMask;
+                cv::threshold(dilatedMask, visMask, 0, 255, cv::THRESH_BINARY);
+                std::string filename = "dilated_mask_" + std::to_string(dilated_save_counter) + ".png";
+                cv::imwrite(filename, visMask);
+                
+                // Also save the original RGB dataset image for correspondence
+                std::string imgFilename = "original_image_" + std::to_string(dilated_save_counter) + ".png";
+                cv::imwrite(imgFilename, InputImage);
+            }
+            */
         } else {
             mpORBextractorLeft->mInstanceMap = cv::Mat();
         }

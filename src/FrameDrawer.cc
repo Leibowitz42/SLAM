@@ -300,12 +300,22 @@ cv::Mat FrameDrawer::DrawFrame(float imageScale)
     cv::Mat imWithInfo;
     DrawTextInfo(im,state, imWithInfo);
 
+    /*
     // [Added for user] Automatically save images every 50 frames for qualitative comparison
-    if(state == Tracking::OK && currentFrame.mnId > 0 && currentFrame.mnId % 50 == 0)
+    if(state == Tracking::OK && currentFrame.mnId > 0)
     {
-        std::string filename = "comparison_frame_" + std::to_string(currentFrame.mnId) + ".png";
-        cv::imwrite(filename, imWithInfo);
+        if(currentFrame.mnId % 50 == 0) {
+            std::string filename = "comparison_frame_" + std::to_string(currentFrame.mnId) + ".png";
+            cv::imwrite(filename, imWithInfo);
+        }
+        
+        // Save consecutive frames corresponding to eroded/dilated masks (Counter offset by 1 because mnId starts at 0)
+        if(currentFrame.mnId == 99 || currentFrame.mnId == 100 || currentFrame.mnId == 101) {
+            std::string filename = "viewer_frame_" + std::to_string(currentFrame.mnId + 1) + ".png";
+            cv::imwrite(filename, imWithInfo);
+        }
     }
+    */
 
     return imWithInfo;
 }
