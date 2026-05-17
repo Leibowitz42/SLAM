@@ -35,17 +35,16 @@ public:
             // =====================================================================
             // [NOVELTY 2]: Zero-Copy Memory Allocation for UMA Architecture
             // =====================================================================
-            // Instead of standard malloc/new, we allocate OpenCV Mat data directly 
-            // on the CUDA Host using cudaHostAlloc with the cudaHostAllocMapped flag.
             // On Jetson (Unified Memory Architecture), CPU and GPU share physical RAM.
-            // Pinned (Page-locked) memory prevents the OS from paging out the buffer,
-            // and the 'Mapped' flag exposes this exact physical address space to 
-            // the GPU's page tables. This entirely eliminates expensive Host-to-Device 
-            // (H2D) and Device-to-Host (D2H) cudaMemcpy operations during YOLO inference.
+            // WARNING: Using `cudaHostAllocMapped` makes the memory UNCACHED by the CPU,
+            // which causes OpenCV's ORB extraction (CPU-based) to be brutally slow (100ms+).
+            // SOLUTION: We use `cudaMallocManaged` (Unified Memory). On Jetson Xavier/Orin, 
+            // Unified Memory is CPU-CACHED and uses hardware cache coherency. 
+            // This gives us full CPU speed for ORB, and 0-copy DMA for YOLO TensorRT!
             void* ptr = nullptr;
-            cudaError_t err = cudaHostAlloc(&ptr, total, cudaHostAllocMapped);
+            cudaError_t err = cudaMallocManaged(&ptr, total, cudaMemAttachGlobal);
             if (err != cudaSuccess) {
-                std::cerr << "cudaHostAlloc failed: " << cudaGetErrorString(err) << std::endl;
+                std::cerr << "cudaMallocManaged failed: " << cudaGetErrorString(err) << std::endl;
                 // Fallback to standard allocation
                 ptr = malloc(total);
             }
@@ -64,7 +63,7 @@ public:
         
         if ((u->flags & cv::UMatData::USER_ALLOCATED) == 0) {
             if (u->origdata) {
-                cudaError_t err = cudaFreeHost(u->origdata);
+                cudaError_t err = cudaFree(u->origdata);
                 if (err != cudaSuccess) {
                     // It might have been allocated with malloc as fallback
                     free(u->origdata);
