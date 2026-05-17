@@ -393,7 +393,7 @@ void Viewer::Run()
             mpSystem->ResetActiveMap();
             menuReset = false;
         }
-
+        
         if(menuStop)
         {
             if(bLocalizationMode)
