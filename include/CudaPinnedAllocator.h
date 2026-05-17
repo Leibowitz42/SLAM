@@ -42,9 +42,10 @@ public:
             // [OOM FIX]: Only allocate large matrices via CUDA Managed Memory
             if (total >= 100000) {
                 void* ptr = nullptr;
-                cudaError_t err = cudaMallocManaged(&ptr, total, cudaMemAttachGlobal);
+                // Use cudaHostAllocDefault to ensure CPU caching on Jetson while keeping it Pinned.
+                cudaError_t err = cudaHostAlloc(&ptr, total, cudaHostAllocDefault);
                 if (err != cudaSuccess) {
-                    std::cerr << "cudaMallocManaged failed: " << cudaGetErrorString(err) << " (Size: " << total << ")" << std::endl;
+                    std::cerr << "cudaHostAlloc failed: " << cudaGetErrorString(err) << " (Size: " << total << ")" << std::endl;
                     ptr = malloc(total);
                 } else {
                     std::lock_guard<std::mutex> lock(mtx);
@@ -78,7 +79,7 @@ public:
                 }
 
                 if (is_managed) {
-                    cudaFree(u->origdata);
+                    cudaFreeHost(u->origdata);
                 } else {
                     free(u->origdata);
                 }
