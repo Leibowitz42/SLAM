@@ -6,7 +6,14 @@
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 
+#include <unordered_set>
+#include <mutex>
+
 class CudaPinnedAllocator : public cv::MatAllocator {
+private:
+    mutable std::unordered_set<void*> managed_ptrs;
+    mutable std::mutex mtx;
+
 public:
     cv::UMatData* allocate(int dims, const int* sizes, int type,
                            void* data, size_t* step,
@@ -32,34 +39,20 @@ public:
             u->data = u->origdata = static_cast<uchar*>(data);
             u->flags |= cv::UMatData::USER_ALLOCATED;
         } else {
-            // =====================================================================
-            // [NOVELTY 2]: Zero-Copy Memory Allocation for UMA Architecture
-            // =====================================================================
-            // On Jetson (Unified Memory Architecture), CPU and GPU share physical RAM.
-            // WARNING: Using `cudaHostAllocMapped` makes the memory UNCACHED by the CPU,
-            // which causes OpenCV's ORB extraction (CPU-based) to be brutally slow (100ms+).
-            // SOLUTION: We use `cudaMallocManaged` (Unified Memory). On Jetson Xavier/Orin, 
-            // Unified Memory is CPU-CACHED and uses hardware cache coherency. 
-            // This gives us full CPU speed for ORB, and 0-copy DMA for YOLO TensorRT!
-            // 
-            // [OOM FIX]: ORB-SLAM3 creates millions of tiny cv::Mat (for math, descriptors).
-            // Allocating them via CUDA exhausts Jetson's mmap limits. We ONLY use Unified Memory 
-            // for large matrices (like 640x480 images > 100KB).
+            // [OOM FIX]: Only allocate large matrices via CUDA Managed Memory
             if (total >= 100000) {
                 void* ptr = nullptr;
                 cudaError_t err = cudaMallocManaged(&ptr, total, cudaMemAttachGlobal);
                 if (err != cudaSuccess) {
                     std::cerr << "cudaMallocManaged failed: " << cudaGetErrorString(err) << " (Size: " << total << ")" << std::endl;
                     ptr = malloc(total);
-                    u->userdata = (void*)0; // Mark as standard malloc
                 } else {
-                    u->userdata = (void*)1; // Mark as cudaMallocManaged
+                    std::lock_guard<std::mutex> lock(mtx);
+                    managed_ptrs.insert(ptr);
                 }
                 u->data = u->origdata = static_cast<uchar*>(ptr);
             } else {
-                // Fast path for small matrices (math, descriptors, UI)
                 u->data = u->origdata = static_cast<uchar*>(malloc(total));
-                u->userdata = (void*)0; // Mark as standard malloc
             }
         }
 
@@ -75,7 +68,16 @@ public:
         
         if ((u->flags & cv::UMatData::USER_ALLOCATED) == 0) {
             if (u->origdata) {
-                if (u->userdata == (void*)1) {
+                bool is_managed = false;
+                {
+                    std::lock_guard<std::mutex> lock(mtx);
+                    if (managed_ptrs.find(u->origdata) != managed_ptrs.end()) {
+                        is_managed = true;
+                        managed_ptrs.erase(u->origdata);
+                    }
+                }
+
+                if (is_managed) {
                     cudaFree(u->origdata);
                 } else {
                     free(u->origdata);
