@@ -41,16 +41,18 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // =====================================================================
+    // [NOVELTY 2]: Ablation Study for UMA Zero-Copy Optimization
+    // =====================================================================
 #if USE_UMA_ZERO_COPY
     cout << "\n==================================================" << endl;
     cout << " [ABLATION] UMA ZERO-COPY IS ENABLED (OURS)" << endl;
-    cout << " OpenCV cv::Mat will use cudaHostAllocMapped." << endl;
     cout << "==================================================\n" << endl;
-    SetCudaPinnedAllocator();
+    // SetCudaPinnedAllocator(); // <-- REMOVED! Do NOT override global allocator!
 #else
     cout << "\n==================================================" << endl;
     cout << " [ABLATION] UMA ZERO-COPY IS DISABLED (BASELINE)" << endl;
-    cout << " OpenCV cv::Mat will use standard malloc." << endl;
+    cout << " Standard malloc will be used for OpenCV." << endl;
     cout << "==================================================\n" << endl;
 #endif
 
