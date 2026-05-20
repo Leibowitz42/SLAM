@@ -140,21 +140,26 @@ void gpuPreprocessExecuteDirect(GpuPreprocessContext& ctx,
     ctx.pad_w = (ctx.dst_width - new_unpad_w) / 2.0f;
     ctx.pad_h = (ctx.dst_height - new_unpad_h) / 2.0f;
 
-    // Upload source image to GPU (async) only if it's not already a CUDA pointer
+    // Upload source image to GPU (async) only if it's not already a CUDA device/managed pointer
     size_t src_bytes = (size_t)src_step * src_height;
     
-    bool is_zerocopy = false;
+    bool is_device_accessible = false;
     cudaPointerAttributes attributes;
     // In CUDA, if pointer is not registered, this returns an error which we can ignore.
     if (cudaPointerGetAttributes(&attributes, src_data) == cudaSuccess) {
-        is_zerocopy = true;
+        // We only bypass the H2D copy if the memory is physically on the device or managed.
+        // If it is host memory (cudaMemoryTypeHost) like pinned memory allocated by CudaPinnedAllocator,
+        // it still resides on the host, so we must upload it to device memory to avoid illegal memory access or severe bus contention.
+        if (attributes.type == cudaMemoryTypeDevice || attributes.type == cudaMemoryTypeManaged) {
+            is_device_accessible = true;
+        }
     } else {
         cudaGetLastError(); // Clear the error from the driver
     }
 
     const uint8_t* kernel_src = src_data;
 
-    if (!is_zerocopy) {
+    if (!is_device_accessible) {
         if (src_bytes > ctx.max_src_bytes) {
             std::cerr << "[GPU Preprocess] WARNING: Reallocating src buffer from "
                       << ctx.max_src_bytes << " to " << src_bytes << " bytes" << std::endl;
