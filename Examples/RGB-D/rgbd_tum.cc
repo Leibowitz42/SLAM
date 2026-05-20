@@ -92,8 +92,14 @@ int main(int argc, char **argv)
     for(int ni=0; ni<nImages; ni++)
     {
         // Read image and depthmap from file
+#if USE_UMA_ZERO_COPY
+        SetCudaPinnedAllocator();
+#endif
         imRGB = cv::imread(string(argv[3])+"/"+vstrImageFilenamesRGB[ni],cv::IMREAD_UNCHANGED); //,cv::IMREAD_UNCHANGED);
         imD = cv::imread(string(argv[3])+"/"+vstrImageFilenamesD[ni],cv::IMREAD_UNCHANGED); //,cv::IMREAD_UNCHANGED);
+#if USE_UMA_ZERO_COPY
+        cv::Mat::setDefaultAllocator(nullptr); // Reset to default for the rest of SLAM
+#endif
         double tframe = vTimestamps[ni];
 
         if(imRGB.empty())
