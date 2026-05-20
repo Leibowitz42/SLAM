@@ -140,28 +140,43 @@ void gpuPreprocessExecuteDirect(GpuPreprocessContext& ctx,
     ctx.pad_w = (ctx.dst_width - new_unpad_w) / 2.0f;
     ctx.pad_h = (ctx.dst_height - new_unpad_h) / 2.0f;
 
-    // Upload source image to GPU (async)
+    // Upload source image to GPU (async) only if it's not already a CUDA pointer
     size_t src_bytes = (size_t)src_step * src_height;
-    if (src_bytes > ctx.max_src_bytes) {
-        std::cerr << "[GPU Preprocess] WARNING: Reallocating src buffer from "
-                  << ctx.max_src_bytes << " to " << src_bytes << " bytes" << std::endl;
-        cudaFree(ctx.d_src);
-        ctx.max_src_bytes = src_bytes;
-        uint8_t* d_src_ptr = nullptr;
-        cudaMalloc(&d_src_ptr, ctx.max_src_bytes);
-        ctx.d_src = d_src_ptr;
+    
+    bool is_zerocopy = false;
+    cudaPointerAttributes attributes;
+    // In CUDA, if pointer is not registered, this returns an error which we can ignore.
+    if (cudaPointerGetAttributes(&attributes, src_data) == cudaSuccess) {
+        is_zerocopy = true;
+    } else {
+        cudaGetLastError(); // Clear the error from the driver
     }
 
-    cudaMemcpyAsync(ctx.d_src, src_data, src_bytes,
-                    cudaMemcpyHostToDevice, cuda_stream);
+    const uint8_t* kernel_src = src_data;
+
+    if (!is_zerocopy) {
+        if (src_bytes > ctx.max_src_bytes) {
+            std::cerr << "[GPU Preprocess] WARNING: Reallocating src buffer from "
+                      << ctx.max_src_bytes << " to " << src_bytes << " bytes" << std::endl;
+            cudaFree(ctx.d_src);
+            ctx.max_src_bytes = src_bytes;
+            uint8_t* d_src_ptr = nullptr;
+            cudaMalloc(&d_src_ptr, ctx.max_src_bytes);
+            ctx.d_src = d_src_ptr;
+        }
+
+        cudaMemcpyAsync(ctx.d_src, src_data, src_bytes,
+                        cudaMemcpyHostToDevice, cuda_stream);
+        kernel_src = (const uint8_t*)ctx.d_src;
+    }
 
     dim3 block(32, 32);
     dim3 grid((ctx.dst_width + block.x - 1) / block.x,
               (ctx.dst_height + block.y - 1) / block.y);
 
-    // Pass the external hardware pointer to swallow the compute result directly
+    // Pass the correct pointer to swallow the compute result directly
     preprocessKernel<<<grid, block, 0, cuda_stream>>>(
-        (const uint8_t*)ctx.d_src, external_dst_ptr,
+        kernel_src, external_dst_ptr,
         src_width, src_height, src_step,
         ctx.dst_width, ctx.dst_height,
         ctx.ratio, ctx.pad_w, ctx.pad_h
