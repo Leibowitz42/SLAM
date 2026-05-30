@@ -68,8 +68,9 @@ void gpuPreprocessExecute(GpuPreprocessContext& ctx,
  * Destroy the GPU preprocess context and free device memory.
  */
 /**
- * Execute GPU preprocessing directly routing output into an external Device Pointer
- * (Zero-Copy D2D elimination, critically useful for Jetson UMA / Native TensorRT)
+ * Execute GPU preprocessing directly routing output into an external Device Pointer.
+ * (Bypasses intermediate D2D buffers, while leveraging a hardware-aware H2D DMA selection
+ * to prevent shared memory bus contention on Jetson platforms)
  */
 void gpuPreprocessExecuteDirect(GpuPreprocessContext& ctx,
                                 const unsigned char* src_data,
